@@ -135,7 +135,7 @@ simulate_and_calibrate <- function(true_params) {
   
   # Use the true epidemiological parameters as the initial guess.
   init_params <- as.numeric(true_params[2:5])
-  n_samples_calib <- 50  # fewer iterations for speed
+  n_samples_calib <- 1000  # fewer iterations for speed
   epsilon <- 1.0
   
   run_lfmcmc(lfmcmc = lfmcmc_obj,
@@ -177,6 +177,7 @@ study_wrapper <- function(i) {
   true_params <- as.numeric(theta_use[i, ])
   result <- simulate_and_calibrate(true_params)
   result$index <- i
+  message("iteration i is done")
   return(result)
 }
 
@@ -185,6 +186,8 @@ if (.Platform$OS.type == "unix") {
 } else {
   cl <- makeCluster(detectCores())
   results_list <- parLapply(cl, 1:N, study_wrapper)
+  message("iteration i is done")
+
   stopCluster(cl)
 }
 
@@ -222,5 +225,237 @@ ggplot(summary_df, aes(x = factor(coverage))) +
   scale_x_discrete(labels = c("0" = "No", "1" = "Yes")) +
   labs(title = "Coverage Distribution", x = "Coverage", y = "Count") +
   theme_minimal()
+```
+
+```{r}
+# Load required libraries
+library(epiworldR)
+library(data.table)
+library(parallel)
+library(ggplot2)
+
+# --------------------------
+# Global Simulation Settings
+# --------------------------
+model_ndays <- 30     # simulation duration (days)
+model_seed  <- 122    # seed for reproducibility
+global_n    <- 10000  # population size (used in calibration)
+
+# --------------------------
+# Generate Parameter Sets using Theta
+# --------------------------
+# Use a small number for fast testing
+N <- 10  
+n_values <- rep(10000, N)  # population size (here constant at 10000)
+theta <- data.table(
+  n      = n_values,                                 # population size
+  preval = sample(100:2000, N, replace = TRUE) / n_values,  # prevalence (as a proportion)
+  crate  = runif(N, 5, 15),                           # contact rate
+  recov  = 1 / runif(N, 4, 14),                       # recovery rate (1/duration)
+  R0     = runif(N, 1, 5)                             # basic reproduction number
+)
+# Calculate transmission rate (ptran) using the provided formula
+theta[, ptran := plogis(qlogis(R0 * recov / crate) + rnorm(.N))]
+# Use only the needed columns (order: n, preval, crate, recov, ptran)
+theta_use <- theta[, .(n, preval, crate, recov, ptran)]
+params=theta_use[1,]
+# --------------------------
+# Define Simulation Functions
+# --------------------------
+model_ndays=30
+# (A) Simulate the "observed" epidemic using the full parameter vector.
+# Parameter vector order: [1] n, [2] preval, [3] crate, [4] recov, [5] ptran.
+simulate_epidemic_observed <- function(params, ndays = model_ndays, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+  sim_model <- ModelSIRCONN(
+    name              = "sim",
+    n                 = 1000,#params[1],
+    prevalence        = 0.17,#params[2],
+    contact_rate      = 11.5,#params[3],
+    transmission_rate = 0.07,#params[5],
+    recovery_rate     =0.13#params[4]
+  )
+  verbose_off(sim_model)
+  run(sim_model, ndays = ndays)
+  get_today_total(sim_model)  # returns vector [Susceptible, Infected, Recovered]
+}
+
+# (B) Simulate during calibration.
+# We calibrate only the epidemiological parameters (preval, crate, recov, ptran)
+# using a fixed population size (global_n).
+# Parameter vector order for calibration: [1] preval, [2] crate, [3] recov, [4] ptran.
+simulate_epidemic_calib <- function(params, ndays = model_ndays, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+  sim_model <- ModelSIRCONN(
+    name              = "sim",
+    n                 = global_n,
+    prevalence        = params[1],
+    contact_rate      = params[2],
+    transmission_rate = params[4],
+    recovery_rate     = params[3]
+  )
+  verbose_off(sim_model)
+  run(sim_model, ndays = ndays)
+  get_today_total(sim_model)
+}
+
+# --------------------------
+# ABC (LFMCMC) Calibration Functions
+# --------------------------
+# These functions work with a 4-parameter vector: [preval, crate, recov, ptran].
+
+simulation_fun <- function(params, lfmcmc_obj) {
+  out <- simulate_epidemic_calib(params, ndays = model_ndays)
+  return(out[2])  # Use the infected count as the summary statistic.
+}
+
+summary_fun <- function(data, lfmcmc_obj) {
+  return(data)
+}
+
+proposal_fun <- function(old_params, lfmcmc_obj) {
+  new_preval <- plogis(qlogis(old_params[1]) + rnorm(1, sd = 0.05))
+  new_crate  <- old_params[2] + rnorm(1, sd = 0.5)
+  new_crate  <- ifelse(new_crate < 0, abs(new_crate), new_crate)
+  new_recov  <- plogis(qlogis(old_params[3]) + rnorm(1, sd = 0.05))
+  new_ptran  <- plogis(qlogis(old_params[4]) + rnorm(1, sd = 0.05))
+  return(c(new_preval, new_crate, new_recov, new_ptran))
+}
+
+kernel_fun <- function(simulated_stat, observed_stat, epsilon, lfmcmc_obj) {
+  diff <- simulated_stat - observed_stat
+  dnorm(diff, mean = 0, sd = epsilon)
+}
+
+# --------------------------
+# Function: Run One Simulation–Calibration Study
+# --------------------------
+simulate_and_calibrate <- function(true_params) {
+  # true_params is a vector of length 5: (n, preval, crate, recov, ptran)
+  
+  # Step 1: Simulate the observed epidemic using the true parameters.
+  observed_out <- simulate_epidemic_observed(true_params, ndays = model_ndays, seed = model_seed)
+  observed_infected <- observed_out[2]
+  
+  # Step 2: Run ABC calibration to recover the epidemiological parameters.
+  # Create a dummy model (n is fixed to global_n for calibration)
+  dummy_model <- ModelSIRCONN(
+    name              = "dummy",
+    n                 = global_n,
+    prevalence        = true_params[2],
+    contact_rate      = true_params[3],
+    transmission_rate = true_params[5],
+    recovery_rate     = true_params[4]
+  )
+  
+  lfmcmc_obj <- LFMCMC(dummy_model) |>
+    set_simulation_fun(simulation_fun) |>
+    set_summary_fun(summary_fun) |>
+    set_proposal_fun(proposal_fun) |>
+    set_kernel_fun(kernel_fun) |>
+    set_observed_data(observed_infected)
+  
+  # Use the true epidemiological parameters as the initial guess.
+  init_params <- as.numeric(true_params[2:5])
+  n_samples_calib <- 100  # 1000 iterations for calibration.
+  epsilon <- 1.0
+  
+  run_lfmcmc(lfmcmc = lfmcmc_obj,
+             params_init = init_params,
+             n_samples = n_samples_calib,
+             epsilon = epsilon,
+             seed = model_seed)
+  
+  # Extract the full chain (all accepted parameter samples)
+  accepted <- get_all_accepted_params(lfmcmc_obj)
+  # Compute the median as the summary calibrated parameter set.
+  calibrated_params <- apply(accepted, 2, median)
+  
+  # Save the complete chain and also the raw simulation replicates.
+  calib_trace <- accepted
+  sim_infected_runs <- replicate(10, {
+    out <- simulate_epidemic_calib(calibrated_params, ndays = model_ndays)
+    out[2]
+  })
+  
+  predicted_infected <- mean(sim_infected_runs)
+  ci <- quantile(sim_infected_runs, probs = c(0.025, 0.975))
+  coverage <- as.numeric(observed_infected >= ci[1] && observed_infected <= ci[2])
+  bias <- predicted_infected - observed_infected
+  
+  # Return a list with each part so you can inspect them separately.
+  return(list(
+    true_params = true_params,
+    observed_infected = observed_infected,
+    calibrated_params = calibrated_params,
+    calib_trace = calib_trace,           # Full LFMCMC chain (all iterations)
+    sim_infected_runs = sim_infected_runs,  # The 10 simulation replicates for prediction
+    predicted_infected = predicted_infected,
+    prediction_ci = ci,
+    coverage = coverage,
+    bias = bias
+  ))
+}
+
+# --------------------------
+# Run the Study in Parallel over the Parameter Sets
+# --------------------------
+# Define a wrapper that processes one parameter set.
+study_wrapper <- function(i) {
+  true_params <- as.numeric(theta_use[i, ])
+  result <- simulate_and_calibrate(true_params)
+  result$index <- i
+  message("Iteration ", i, " is done")
+  return(result)
+}
+
+if (.Platform$OS.type == "unix") {
+  results_list <- mclapply(1:N, study_wrapper, mc.cores = detectCores())
+} else {
+  cl <- makeCluster(detectCores())
+  results_list <- parLapply(cl, 1:N, study_wrapper)
+  stopCluster(cl)
+}
+
+# --------------------------
+# Summarize and Compare Results (Summary level per true parameter set)
+# --------------------------
+indices            <- sapply(results_list, function(x) x$index)
+true_infected      <- sapply(results_list, function(x) x$observed_infected)
+predicted_infected <- sapply(results_list, function(x) x$predicted_infected)
+coverage_vector    <- sapply(results_list, function(x) x$coverage)
+bias_vector        <- sapply(results_list, function(x) x$bias)
+
+summary_df <- data.frame(
+  index = indices,
+  observed_infected = true_infected,
+  predicted_infected = predicted_infected,
+  coverage = coverage_vector,
+  bias = bias_vector
+)
+
+overall_coverage <- mean(coverage_vector)
+overall_bias     <- mean(bias_vector)
+cat("Overall Coverage:", overall_coverage, "\n")
+cat("Overall Bias:", overall_bias, "\n")
+print(summary_df)
+
+# Example: Inspect details from the first simulation-calibration run.
+first_run <- results_list[[1]]
+
+# The true parameters used:
+first_run$true_params
+
+# The observed infected count:
+first_run$observed_infected
+
+# The full calibration trace (all 1000 iterations):
+head(first_run$calib_trace)
+# You could also plot the trace for one parameter:
+plot(first_run$calib_trace[,1], type = "l", main = "Trace for Prevalence", xlab = "Iteration", ylab = "Prevalence")
+
+# The 10 simulation replicates used to predict the epidemic:
+first_run$sim_infected_runs
+
 ```
 
