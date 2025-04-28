@@ -4,6 +4,7 @@ library(data.table)
 library(parallel)
 library(ggplot2)
 library(dplyr)
+library(slurmR)  # Add slurmR library
 
 # --------------------------
 # Global Simulation Settings
@@ -34,7 +35,7 @@ theta_use <- theta[, .(n, preval, crate, recov, ptran)]
 # Print the true parameter sets for reference
 cat("True parameter sets:\n")
 print(theta_use)
-saveRDS(theta_use, "theta_use.rds")
+
 # --------------------------
 # Define Simulation Functions
 # --------------------------
@@ -226,28 +227,66 @@ simulate_and_calibrate <- function(true_params, sim_id) {
 }
 
 # --------------------------
-# Run Simulations in Parallel
+# Run Simulations using slurmR instead of mclapply
 # --------------------------
-# Determine how many cores to use
-n_cores <- min(detectCores() - 1, N_SIMS)
-if (n_cores < 1) n_cores <- 1
-n_cores=18
-cat("Running", N_SIMS, "simulations using", n_cores, "cores...\n")
-set.seed(model_seed)  # Set global seed for reproducibility
+# Load required libraries
+library(slurmR)
 
-# Run simulations in parallel if available
-if (n_cores > 1 && requireNamespace("parallel", quietly = TRUE)) {
-  results_list <- mclapply(1:N_SIMS, function(i) {
-    simulate_and_calibrate(as.numeric(theta_use[i]), i)
-  }, mc.cores = n_cores)
-} else {
-  # Sequential processing
-  results_list <- list()
-  for (i in 1:N_SIMS) {
-    results_list[[i]] <- simulate_and_calibrate(as.numeric(theta_use[i]), i)
-  }
-}
+# Configure Slurm options correctly
+opts <- list(
+  account     = "my-account",     # Replace with your account
+  partition   = "my-partition",   # Replace with your partition
+  "cpus-per-task" = 1,
+  "mem-per-cpu"   = "4G",
+  time        = "01:00:00"
+)
 
+# Create a Slurm job
+sjob <- Slurm_lapply(
+  X        = 1:N_SIMS,
+  FUN      = function(i) simulate_and_calibrate(as.numeric(theta_use[i]), i),
+  njobs    = 20,           # Split into 20 jobs (5 simulations per job)
+  mc.cores = 1,            # Cores per job
+  tmp_path = getwd(),      # Use current directory for temp files
+  sbatch_opt = opts,       # Pass Slurm options here
+  job_name = "epidemic_sim"
+)
+
+# Submit the job
+sjob <- sbatch(sjob)
+
+# Later, collect results
+results_list <- Slurm_collect(sjob)
+
+# Option 2: Using makeSlurmCluster (alternative approach)
+#Comment out Option 1 above and uncomment this section to use this approach
+cl <- makeSlurmCluster(
+  n_cores,
+  sbatch_opt = list(
+    time = "12:00:00",
+    mem_per_cpu = "4G",
+    job_name = "epi_sim"
+  )
+)
+
+# Export any needed variables to the cluster
+clusterExport(cl, c("model_ndays", "model_seed", "global_n", "theta_use", "N_SIMS"))
+
+# Make sure all needed packages are loaded on the cluster nodes
+clusterEvalQ(cl, {
+  library(epiworldR)
+  library(data.table)
+  library(ggplot2)
+  library(dplyr)
+})
+
+# Run the simulations
+results_list <- parLapply(cl, 1:N_SIMS, function(i) {
+  simulate_and_calibrate(as.numeric(theta_use[i]), i)
+})
+
+# Stop the cluster when done
+stopCluster(cl)
 
 # --------------------------
 # Combine and Analyze Results
