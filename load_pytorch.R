@@ -2,7 +2,7 @@ library(reticulate)
 
 torch <- import("torch")
 
-model_path <- normalizePath("~/Desktop/Sims_calibrate/model4_bilstm.pt")
+model_path <- normalizePath("~/Desktop/Sims_calibrate/model4_bilstm_new.pt")
 
 library(reticulate)
 
@@ -21,7 +21,7 @@ np <- import("numpy")
 os <- import("os")
 
 # Define paths (adjust to your actual paths)
-model_path <- normalizePath("~/Desktop/Sims_calibrate/model4_bilstm.pt")
+model_path <- normalizePath("~/Desktop/Sims_calibrate/model4_bilstm_new.pt")
 # Assume scalers are in the same directory or specify full paths
 scaler_additional_path <- normalizePath("~/Desktop/Sims_calibrate/scaler_additional.pkl")
 scaler_targets_path <- normalizePath("~/Desktop/Sims_calibrate/scaler_targets.pkl")

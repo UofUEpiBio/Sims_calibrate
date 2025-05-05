@@ -1,0 +1,23 @@
+
+The following have been reloaded with a version change:
+  1) R/4.4.0 => R/4.2.2     2) gcc/13.1.0 => gcc/8.5.0
+
+Warning message:
+package ‘epiworldR’ was built under R version 4.4.0 
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:data.table’:
+
+    between, first, last
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+/uufs/notchpeak.peaks/sys/var/slurm/slurmd.spool/notch365//job4140381/slurm_script: line 17: 3258117 Killed                  Rscript run_single_sim.R
+slurmstepd: error: Detected 1 oom_kill event in StepId=4140381.batch. Some of the step tasks have been OOM Killed.

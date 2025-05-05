@@ -7,8 +7,8 @@
 #SBATCH --mem-per-cpu=4G
 #SBATCH --time=01:00:00
 #SBATCH --account=vegayon-np
-#SBATCH --partition=notchpeak
-#SBATCH --qos=vegayon-np
+#SBATCH --partition=vegayon-shared-np
+
 
 # Load R module
 module load R/4.2.2
