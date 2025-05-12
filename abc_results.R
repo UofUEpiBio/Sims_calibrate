@@ -31,7 +31,7 @@ all_sims <- params_all %>%
     # Build model
     m <- ModelSIRCONN(
       name              = "COVID-19",
-      n                 = 1000,
+      n                 = 5000,
       prevalence        = prevalence,
       contact_rate      = contact_rate,
       transmission_rate = transmission_rate,
@@ -75,7 +75,10 @@ summary_df <- all_sims %>%
     upper95  = quantile(I, 0.975),
     .groups  = "drop"
   )
+saveRDS(summary_df, file = "summary_df.rds")
 
+# Later, to read it back in:
+summary_df_loaded <- readRDS("summary_df.rds")
 # 4) Plot true vs abc curves with ribbons
 ggplot(summary_df,
        aes(x = time, y = median_I,

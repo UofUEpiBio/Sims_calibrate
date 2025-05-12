@@ -151,7 +151,6 @@ reticulate::py_install("joblib")
 
 recov <- 0.1
 n <- 5000
-result <- calibrate_sir(infected_original, n, recov)
 ptran <- result[1]
 crate <- result[2]
 r0 <- result[3]
@@ -201,3 +200,86 @@ ggplot(df_plot, aes(x = Day, y = Infected, color = Model, linetype = Model)) +
   theme_minimal() +
   scale_color_manual(values = c("Original" = "blue", "Calibrated" = "red")) +
   theme(legend.title = element_blank())
+
+
+
+####
+library(epiworldR)
+library(dplyr)
+library(ggplot2)
+
+# --- your inputs -------------------------------------
+recov <- 0.1
+n     <- 5000
+ptran <- result[1]
+crate <- result[2]
+r0    <- result[3]
+
+# compute the “calibrated” contact rate so that R0 = r0_pred
+crate_true <- (r0 * recov) / ptran
+
+# --- define two models --------------------------------
+model_uncalib <- ModelSIRCONN(
+  name              = "Uncalibrated",
+  prevalence        = 0.01,
+  n                 = 5000,
+  contact_rate      = 10,
+  transmission_rate = 0.03,
+  recovery_rate     = 0.1
+)
+
+model_calib <- ModelSIRCONN(
+  name              = "Calibrated",
+  prevalence        = 0.01,
+  n                 = 5000,
+  contact_rate      = crate_true,
+  transmission_rate = ptran,
+  recovery_rate     = recov
+)
+
+# --- set up a saver for the active (I) compartment ----
+saver <- make_saver("total_hist")
+
+# --- run 20 sims × 60 days in parallel -----------------
+run_multiple(model_uncalib, ndays = 60, nsims = 20,
+             saver = saver, nthread = 10)
+run_multiple(model_calib,  ndays = 60, nsims = 20,
+             saver = saver, nthread = 10)
+
+# --- extract & label results --------------------------
+res_uncalib <- run_multiple_get_results(model_uncalib)$total_hist %>%
+  filter(state == "Infected") %>%
+  rename(time = date, rep = sim_num, I = counts) %>%
+  mutate(model = "Uncalibrated")
+
+res_calib <- run_multiple_get_results(model_calib)$total_hist %>%
+  filter(state == "Infected") %>%
+  rename(time = date, rep = sim_num, I = counts) %>%
+  mutate(model = "Calibrated")
+
+all_results <- bind_rows(res_uncalib, res_calib)
+
+# --- summarize mean + 95% CI --------------------------
+summary_df <- all_results %>%
+  group_by(model, time) %>%
+  summarize(
+    mean_I = mean(I),
+    lower  = quantile(I, 0.025),
+    upper  = quantile(I, 0.975),
+    .groups = "drop"
+  )
+
+# --- plot ----------------------------------------------
+p <- ggplot(summary_df, aes(x = time, y = mean_I, color = model, fill = model)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, color = NA) +
+  labs(
+    x     = "Day",
+    y     = "Active Infected (I)",
+    title = "True vs. Calibrated SIRCONN Simulations",
+    color = NULL, fill = NULL
+  ) +
+  theme_minimal(base_size = 14)
+
+print(p)
+View(summary_df)
