@@ -176,6 +176,6 @@ example_n <- 5000
 example_recov <- 0.1
 
 # Make prediction
-predictions <- predict_with_bilstm(example_time_series, example_n, example_recov)
+predictions <- predict_with_bilstm(infected_original, example_n, example_recov)
 print("Predictions:")
 print(predictions)

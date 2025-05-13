@@ -110,7 +110,7 @@ summary_fun <- function(data, lfmcmc_obj) {
 # Generate new parameter proposals
 proposal_fun <- function(old_params, lfmcmc_obj) {
   # Proposals with appropriate step sizes for each parameter
-  new_preval <- plogis(qlogis(old_params[1]) + rnorm(1, sd = 0.1))
+  #new_preval <- plogis(qlogis(old_params[1]) + rnorm(1, sd = 0.1))
   new_crate  <- old_params[2] * exp(rnorm(1, sd = 0.1))  # Log-normal proposal
   new_recov  <- old_params[3] * exp(rnorm(1, sd = 0.1))  # Log-normal proposal
   new_ptran  <- plogis(qlogis(old_params[4]) + rnorm(1, sd = 0.1))

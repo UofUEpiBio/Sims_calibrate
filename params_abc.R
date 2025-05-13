@@ -14,7 +14,7 @@ library(cowplot)
 model_ndays <- 60   # simulation duration (days)
 model_seed  <- 122  # seed for reproducibility
 global_n    <- 5000  # population size (used in calibration)
-N_SIMS      <- 200  # number of simulations to run
+N_SIMS      <- 10000  # number of simulations to run
 
 # --------------------------
 # Generate Parameter Sets using Theta
@@ -102,14 +102,14 @@ simulate_epidemic_calib <- function(params, ndays = model_ndays, seed = NULL) {
 # This function simulates using the proposed parameters and returns all daily infected counts
 simulation_fun <- function(params, lfmcmc_obj) {
   # Extract parameters for simulation
-  # We have: prevalence, R0, recovery_rate, transmission_prob, contact_rate
-  # Need to pass to simulate_epidemic_calib: prevalence, contact_rate, recovery_rate, transmission_prob
+  # We now have: contact_rate, recovery_rate, transmission_prob (3 parameters)
+  # prevalence and R0 are not estimated/predicted
   
   sim_params <- c(
-    params[1],  # prevalence
-    params[5],  # contact_rate (calculated from R0, recovery, transmission)
-    params[3],  # recovery_rate
-    params[4]   # transmission_prob
+    true_params[2],  # prevalence (fixed at true value)
+    params[1],       # contact_rate
+    params[2],       # recovery_rate
+    params[3]        # transmission_prob
   )
   
   # Run simulation with the parameters
@@ -125,19 +125,13 @@ summary_fun <- function(data, lfmcmc_obj) {
 # Generate new parameter proposals
 proposal_fun <- function(old_params, lfmcmc_obj) {
   # Proposals with appropriate step sizes for each parameter
-  # old_params contains: prevalence, R0, recovery_rate, transmission_prob, contact_rate
+  # old_params contains: contact_rate, recovery_rate, transmission_prob
   
-  new_preval <- plogis(qlogis(old_params[1]) + rnorm(1, sd = 0.1))
-  new_R0     <- old_params[2] * exp(rnorm(1, sd = 0.1))  # Log-normal proposal for R0
-  new_recov  <- old_params[3] * exp(rnorm(1, sd = 0.1))  # Log-normal proposal
-  new_ptran  <- plogis(qlogis(old_params[4]) + rnorm(1, sd = 0.1))
+  new_crate <- old_params[1] * exp(rnorm(1, sd = 0.1))  # Log-normal proposal
+  new_recov <- old_params[2] * exp(rnorm(1, sd = 0.1))  # Log-normal proposal
+  new_ptran <- plogis(qlogis(old_params[3]) + rnorm(1, sd = 0.1))
   
-  # Calculate contact rate based on R0, recovery rate, and transmission rate
-  # R0 = (contact_rate * transmission_rate) / recovery_rate
-  # Therefore: contact_rate = (R0 * recovery_rate) / transmission_rate
-  new_crate <- (new_R0 * new_recov) / new_ptran
-  
-  return(c(new_preval, new_R0, new_recov, new_ptran, new_crate))
+  return(c(new_crate, new_recov, new_ptran))
 }
 
 # Kernel function using sum of squared differences across all days
@@ -161,7 +155,7 @@ simulate_and_calibrate <- function(true_params, sim_id) {
   observed_infected <- simulate_epidemic_observed(true_params, ndays = model_ndays, 
                                                   seed = model_seed + sim_id)
   
-  # Step 2: ABC calibration with R0
+  # Step 2: ABC calibration (without prevalence and R0)
   # Create a dummy model for LFMCMC
   dummy_model <- ModelSIRCONN(
     name              = "dummy",
@@ -172,6 +166,9 @@ simulate_and_calibrate <- function(true_params, sim_id) {
     recovery_rate     = 0.1
   )
   
+  # Make true_params available to simulation_fun
+  true_params <<- true_params
+  
   # Setup and run LFMCMC with the full time series
   lfmcmc_obj <- LFMCMC(dummy_model)
   lfmcmc_obj <- set_simulation_fun(lfmcmc_obj, simulation_fun)
@@ -181,13 +178,11 @@ simulate_and_calibrate <- function(true_params, sim_id) {
   lfmcmc_obj <- set_observed_data(lfmcmc_obj, observed_infected)
   
   # Initial parameters for ABC: 
-  # prevalence, R0, recovery rate, transmission probability, contact rate
+  # contact_rate, recovery rate, transmission probability (no prevalence, no R0)
   init_params <- c(
-    true_params[2],              # prevalence
-    true_R0,                     # R0
+    true_params[3],              # contact rate
     true_params[4],              # recovery rate
-    true_params[5],              # transmission probability
-    true_params[3]               # contact rate (derived from the above)
+    true_params[5]               # transmission probability
   )
   
   # Run the LFMCMC
@@ -212,11 +207,13 @@ simulate_and_calibrate <- function(true_params, sim_id) {
     calibrated_params_raw <- apply(accepted, 2, median)
     
     # Extract the calibrated parameters
-    abc_preval <- calibrated_params_raw[1]
-    abc_R0 <- calibrated_params_raw[2]
-    abc_recov <- calibrated_params_raw[3]
-    abc_ptran <- calibrated_params_raw[4]
-    abc_crate <- calibrated_params_raw[5]  # This is derived from R0, recov, ptran
+    abc_crate <- calibrated_params_raw[1]
+    abc_recov <- calibrated_params_raw[2]
+    abc_ptran <- calibrated_params_raw[3]
+    
+    # Keep prevalence and R0 fixed at true values (not predicted)
+    abc_preval <- true_params[2]
+    abc_R0 <- true_R0
     
     # Create final calibrated parameter vector for simulation
     calibrated_params <- c(abc_preval, abc_crate, abc_recov, abc_ptran)
@@ -259,18 +256,16 @@ simulate_and_calibrate <- function(true_params, sim_id) {
                           NA)
   )
   
-  # Parameter comparison - Include R0 and derived contact rate
+  # Parameter comparison - Only the 3 calibrated parameters
   param_comparison <- data.frame(
     sim_id = sim_id,
-    parameter = c("prevalence", "contact_rate", "recovery_rate", "transmission_prob", "R0"),
-    true_value = c(true_params[2:5], true_R0),
-    abc_calibrated_value = c(calibrated_params, abc_R0),
+    parameter = c("contact_rate", "recovery_rate", "transmission_prob"),
+    true_value = c(true_params[3:5]),
+    abc_calibrated_value = c(abc_crate, abc_recov, abc_ptran),
     abc_error_pct = c(
-      (calibrated_params[1] - true_params[2]) / true_params[2] * 100,
-      (calibrated_params[2] - true_params[3]) / true_params[3] * 100,
-      (calibrated_params[3] - true_params[4]) / true_params[4] * 100,
-      (calibrated_params[4] - true_params[5]) / true_params[5] * 100,
-      (abc_R0 - true_R0) / true_R0 * 100
+      (abc_crate - true_params[3]) / true_params[3] * 100,
+      (abc_recov - true_params[4]) / true_params[4] * 100,
+      (abc_ptran - true_params[5]) / true_params[5] * 100
     )
   )
   
@@ -301,11 +296,11 @@ simulate_and_calibrate <- function(true_params, sim_id) {
 # --------------------------
 # Determine how many cores to use
 
-  # Sequential processing
-  results_list <- list()
-  for (i in 1:N_SIMS) {
-    results_list[[i]] <- simulate_and_calibrate(as.numeric(theta_use[i]), i)
-  }
+# Sequential processing
+results_list <- list()
+for (i in 1:N_SIMS) {
+  results_list[[i]] <- simulate_and_calibrate(as.numeric(theta_use[i]), i)
+}
 
 # --------------------------
 # Extract and Save Parameter Results
@@ -320,9 +315,8 @@ param_comparisons <- bind_rows(lapply(results_list, function(x) x$param_comparis
 abc_parameters <- bind_rows(lapply(results_list, function(x) x$abc_parameters))
 
 # Save the parameter results (this is what you specifically requested)
-saveRDS(abc_parameters, "abc_predicted_parameters_200_fixedrecn.rds")
-write.csv(abc_parameters, "abc_predicted_parameters_200_fixedrecn.csv", row.names = FALSE)
-
+saveRDS(abc_parameters, "abc_predicted_parameters_1000_fixedrecn.rds")
+write.csv(abc_parameters, "abc_predicted_parameters_1000_fixedrecn.csv", row.names = FALSE)
 
 
 

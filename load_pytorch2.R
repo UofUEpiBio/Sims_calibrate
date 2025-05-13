@@ -124,6 +124,10 @@ model_sir <- ModelSIRCONN(
   transmission_rate = 0.03,
   recovery_rate = 0.1
 )
+run(model_sir,ndays = 60)
+incidence <- plot_incidence(model_sir,plot=FALSE)
+infected_original=incidence[,1]
+?plot_incidence
 
 saver <- make_saver("total_hist")
 run_multiple(model_sir, ndays = 60, nsims = 1, saver = saver, nthread = 2)
@@ -147,7 +151,7 @@ n <- 5000
 result <- predict_with_bilstm(infected_original, n, recov)
 # --- Calibrate
 #reticulate::py_install("torch")
-reticulate::py_install("joblib")
+#reticulate::py_install("joblib")
 
 recov <- 0.1
 n <- 5000
