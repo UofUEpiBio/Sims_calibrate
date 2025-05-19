@@ -1,5 +1,23 @@
 # Entire R script: load Bi-LSTM + scalers (with fallback for unfitted incidence) via reticulate
 
+file_path <- "/uufs/chpc.utah.edu/common/home/u1418987/Desktop/Sims_calibrate/scaler_incidence 1 (1).pk"
+file_path= incidence_scaler
+# Escape special characters in path (like spaces and parentheses)
+safe_path <- gsub(" ", "\\\\ ", file_path)
+safe_path <- gsub("\\(", "\\\\(", safe_path)
+safe_path <- gsub("\\)", "\\\\)", safe_path)
+
+# Load the file using Python
+py_run_string(sprintf("
+import pickle
+with open('%s', 'rb') as f:
+    data = pickle.load(f)
+", safe_path))
+
+# Access the loaded Python object in R
+py$data
+
+
 library(reticulate)
 
 # 1) Write Python helper (model_utils.py) ---------------------------------------
@@ -108,7 +126,12 @@ set.seed(123)
 example_ts <- runif(60, min = 0, max = 100)
 print(predict_with_bilstm(example_ts, n = 5000, recov = 0.1))
 
+# During training (add this line to your training script):
+joblib.dump(scaler_incidence, "model_output/scaler_incidence.pkl")
 
+# During inference:
+scaler_incidence = joblib.load("model_output/scaler_incidence.pkl")
+scaled_new_data = scaler_incidence.transform(example_ts)
 
 
 
@@ -128,19 +151,18 @@ run(model_sir,ndays = 60)
 incidence <- plot_incidence(model_sir,plot=FALSE)
 infected_original=incidence[,1]
 ?plot_incidence
-
-saver <- make_saver("total_hist")
-run_multiple(model_sir, ndays = 60, nsims = 1, saver = saver, nthread = 2)
-ans <- run_multiple_get_results(model_sir)
-df_original <- ans$total_hist
+# 
+# saver <- make_saver("total_hist")
+# run_multiple(model_sir, ndays = 60, nsims = 1, saver = saver, nthread = 2)
+# ans <- run_multiple_get_results(model_sir)
+# df_original <- ans$total_hist
 # Extract infected counts
-infected_original <- df_original[df_original$state == "Infected", 5]
+#infected_original <- df_original[df_original$state == "Infected", 5]
 infected_original <- infected_original[-1]  # remove day 0
 #length(infected_original)
 #infected_df <- df_original %>%
 #  filter(state == "Infected") %>%
 #  arrange(sim_num, date)
-
 #crate_true=(r0*recov)/ptran
 #3*0.1/0.4
 #1.5*0.1/0.03
@@ -148,7 +170,30 @@ infected_original <- infected_original[-1]  # remove day 0
 
 recov <- 0.1
 n <- 5000
-result <- predict_with_bilstm(infected_original, n, recov)
+joblib <- import("joblib")
+library(reticulate)
+
+# Import joblib
+joblib <- import("joblib")
+
+# Use raw string (or escape manually)
+scaler <- joblib$load("scaler_incidence 1 (1).pkl")
+
+# Create a Python-compatible matrix
+# Import numpy
+np <- import("numpy")
+
+# Create some sample data
+data <- as.matrix(infected_original)
+
+# Fit the scaler
+scaler$fit(data)
+
+# Now transform the data
+scaled_data <- scaler$transform(data)
+print(scaled_data)
+
+result <- predict_with_bilstm(scaled_data, n, recov)
 # --- Calibrate
 #reticulate::py_install("torch")
 #reticulate::py_install("joblib")
@@ -169,11 +214,9 @@ calibrated_model <- ModelSIRCONN(
   recovery_rate = recov
 )
 
-run_multiple(calibrated_model, ndays = 50, nsims = 1, saver = saver, nthread = 8)
-results <- run_multiple_get_results(calibrated_model)
-df_calibrated <- results$total_hist
-
-infected_calibrated <- df_calibrated[df_calibrated$state == "Infected", 5]
+run(calibrated_model,ndays = 60)
+incidence <- plot_incidence(calibrated_model,plot=FALSE)
+infected_calibrated=incidence[,1]
 infected_calibrated <- infected_calibrated[-1]
 
 # --- Plot both curves

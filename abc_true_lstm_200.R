@@ -3,7 +3,7 @@
 library(tidyverse)
 library(epiworldR)
 library(glue)
-
+source("load_pytorch2.R")
 # 1) load your ABC predictions
 abc_pred <- readRDS("~/Desktop/Sims_calibrate/abc_predicted_parameters_200_fixedrecn.rds")
 
@@ -32,15 +32,9 @@ for (i in 1:nrow(abc_pred)) {
       transmission_rate = abc_pred$true_ptran[i],
       recovery_rate     = recov
     )
-    sv <- make_saver("total_hist")
-    run_multiple(m0, ndays = ndays, nsims = 1, saver = sv, nthreads = 1)
-    df0 <- run_multiple_get_results(m0)$total_hist
-    
-    # b) pull out the counts vector, drop the first (day 0), then take days 1:60
-    all_counts <- df0 %>%
-      filter(state == "Infected") %>%
-      arrange(date) %>%
-      pull(counts)
+    run(m0,ndays = 60)
+    incidence <- plot_incidence(m0,plot=FALSE)
+    all_counts=incidence[,1]
     
     ts <- all_counts[-1]           # drop day0
     ts <- ts[1:ndays]              # force exactly 60 values
@@ -48,9 +42,29 @@ for (i in 1:nrow(abc_pred)) {
     if (length(ts) != ndays) {
       stop(glue("After dropping day0 and subsetting, length(ts) = {length(ts)}, not {ndays}!"))
     }
+    joblib <- import("joblib")
+    library(reticulate)
     
+    # Import joblib
+    joblib <- import("joblib")
+    
+    # Use raw string (or escape manually)
+    scaler <- joblib$load("scaler_incidence 1 (1).pkl")
+    
+    # Create a Python-compatible matrix
+    # Import numpy
+    np <- import("numpy")
+    
+    # Create some sample data
+    data <- as.matrix(ts)
+    
+    # Fit the scaler
+    scaler$fit(data)
+    
+    # Now transform the data
+    scaled_data <- scaler$transform(data)
     # c) predict parameters
-    lstm_out <- predict_with_bilstm(ts, n, recov)
+    lstm_out <- predict_with_bilstm(scaled_data, n, recov)
     
     # Extract values from LSTM output (ptran, crate, R0)
     ptran_lstm <- lstm_out[1]
@@ -111,9 +125,9 @@ params_all <- abc_pred %>%
          contact_rate_abc       = abc_crate,
          transmission_rate_abc  = abc_ptran,
          recovery_rate_abc      = abc_recov) %>%
-  inner_join(lstm_preds, by = "sim_id") %>%
+  inner_join(lstm_preds, by = "sim_id") %>% 
   # Add recovery rate for LSTM (should be 0.1)
-  mutate(recovery_rate_lstm = 0.1) %>%
+  mutate(recovery_rate_lstm = 0.1)%>%mutate(recovery_rate_abc=0.1) %>%
   pivot_longer(
     cols = -sim_id,
     names_to     = c(".value","param_type"),

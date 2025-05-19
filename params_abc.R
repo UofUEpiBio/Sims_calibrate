@@ -14,7 +14,7 @@ library(cowplot)
 model_ndays <- 60   # simulation duration (days)
 model_seed  <- 122  # seed for reproducibility
 global_n    <- 5000  # population size (used in calibration)
-N_SIMS      <- 10000  # number of simulations to run
+N_SIMS      <- 1000  # number of simulations to run
 
 # --------------------------
 # Generate Parameter Sets using Theta

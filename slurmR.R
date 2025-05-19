@@ -1,4 +1,4 @@
-# Load required libraries
+#Load required libraries
 library(epiworldR)
 library(data.table)
 library(parallel)
@@ -14,13 +14,14 @@ library(cowplot)
 model_ndays <- 60   # simulation duration (days)
 model_seed  <- 122  # seed for reproducibility
 global_n    <- 5000  # population size (used in calibration)
-N_SIMS      <- 10  # number of simulations to run
+N_SIMS      <- 100   # number of simulations to run
+N_CORES     <- 10    # number of cores to use
 
 # --------------------------
 # Generate Parameter Sets using Theta
 # --------------------------
 set.seed(model_seed)  # Ensure reproducibility
-n_values <- rep(5000, N_SIMS)  # population size (constant at 10000)
+n_values <- rep(5000, N_SIMS)  # population size (constant at 5000)
 theta <- data.table(
   n      = n_values,
   preval = sample(100:2000, N_SIMS, replace = TRUE) / n_values,
@@ -96,60 +97,17 @@ simulate_epidemic_calib <- function(params, ndays = model_ndays, seed = NULL) {
 }
 
 # --------------------------
-# ABC (LFMCMC) Calibration Functions
+# Function: Simulation–Calibration Study with ABC only
 # --------------------------
-
-# This function simulates using the proposed parameters and returns all daily infected counts
-simulation_fun <- function(params, lfmcmc_obj) {
-  # Extract parameters for simulation
-  # We now have: contact_rate, recovery_rate, transmission_prob (3 parameters)
-  # prevalence and R0 are not estimated/predicted
+simulate_and_calibrate <- function(true_params, sim_id) {
+  # Load required libraries for parallel execution
+  library(epiworldR)
+  library(data.table)
   
-  sim_params <- c(
-    true_params[2],  # prevalence (fixed at true value)
-    params[1],       # contact_rate
-    params[2],       # recovery_rate
-    params[3]        # transmission_prob
-  )
+  # Ensure true_params is a numeric vector
+  true_params <- as.numeric(true_params)
   
-  # Run simulation with the parameters
-  infected_counts <- simulate_epidemic_calib(sim_params, ndays = model_ndays)
-  return(as.numeric(infected_counts))
-}
-
-# This returns the observed data (all daily infected counts)
-summary_fun <- function(data, lfmcmc_obj) {
-  return(as.numeric(data))
-}
-
-# Generate new parameter proposals
-proposal_fun <- function(old_params, lfmcmc_obj) {
-  # Proposals with appropriate step sizes for each parameter
-  # old_params contains: contact_rate, recovery_rate, transmission_prob
-  
-  new_crate <- old_params[1] * exp(rnorm(1, sd = 0.1))  # Log-normal proposal
-  new_recov <- old_params[2] * exp(rnorm(1, sd = 0.1))  # Log-normal proposal
-  new_ptran <- plogis(qlogis(old_params[3]) + rnorm(1, sd = 0.1))
-  
-  return(c(new_crate, new_recov, new_ptran))
-}
-
-# Kernel function using sum of squared differences across all days
-kernel_fun <- function(simulated_stat, observed_stat, epsilon, lfmcmc_obj) {
-  # Calculate the sum of squared differences across all days
-  diff <- sum((simulated_stat - observed_stat)^2)
-  return(exp(-diff / (2 * epsilon^2)))
-}
-
-# --------------------------
-# Function: Simulation–Calibration Study with ABC only (for Slurm)
-# --------------------------
-simulate_and_calibrate_slurm <- function(sim_id) {
-  # Load the theta_use data
-  theta_use <- readRDS("theta_use.rds")
-  true_params <- as.numeric(theta_use[sim_id])
-  
-  cat("Running simulation", sim_id, "of", nrow(theta_use), "\n")
+  cat("Running simulation", sim_id, "of", N_SIMS, "\n")
   
   # Calculate true R0 from true parameters
   # R0 = (contact_rate * transmission_rate) / recovery_rate
@@ -170,8 +128,34 @@ simulate_and_calibrate_slurm <- function(sim_id) {
     recovery_rate     = 0.1
   )
   
-  # Make true_params available to simulation_fun
-  true_params <<- true_params
+  # Define ABC functions within the worker function to avoid scoping issues
+  simulation_fun <- function(params, lfmcmc_obj) {
+    sim_params <- c(
+      true_params[2],  # prevalence (fixed at true value)
+      params[1],       # contact_rate
+      params[2],       # recovery_rate
+      params[3]        # transmission_prob
+    )
+    
+    infected_counts <- simulate_epidemic_calib(sim_params, ndays = model_ndays)
+    return(as.numeric(infected_counts))
+  }
+  
+  summary_fun <- function(data, lfmcmc_obj) {
+    return(as.numeric(data))
+  }
+  
+  proposal_fun <- function(old_params, lfmcmc_obj) {
+    new_crate <- old_params[1] * exp(rnorm(1, sd = 0.1))
+    new_recov <- old_params[2] * exp(rnorm(1, sd = 0.1))
+    new_ptran <- plogis(qlogis(old_params[3]) + rnorm(1, sd = 0.1))
+    return(c(new_crate, new_recov, new_ptran))
+  }
+  
+  kernel_fun <- function(simulated_stat, observed_stat, epsilon, lfmcmc_obj) {
+    diff <- sum((simulated_stat - observed_stat)^2)
+    return(exp(-diff / (2 * epsilon^2)))
+  }
   
   # Setup and run LFMCMC with the full time series
   lfmcmc_obj <- LFMCMC(dummy_model)
@@ -296,361 +280,190 @@ simulate_and_calibrate_slurm <- function(sim_id) {
 }
 
 # --------------------------
-# Manual Slurm Script Approach (workaround for slurmR bug)
+# Run Simulations in Parallel
 # --------------------------
 
-# Create chunks of simulation IDs
-n_jobs <- 100  # Number of jobs to submit
-sims_per_job <- ceiling(N_SIMS / n_jobs)
-sim_chunks <- split(1:N_SIMS, ceiling(seq_along(1:N_SIMS) / sims_per_job))
+# Setup cluster for parallel processing
+cat("Setting up parallel cluster with", N_CORES, "cores...\n")
+cl <- makeCluster(N_CORES)
 
-# Create directories for Slurm scripts and output
-dir.create("slurm_scripts", showWarnings = FALSE)
-dir.create("slurm_output", showWarnings = FALSE)
+# Export necessary objects and functions to the cluster
+clusterExport(cl, c(
+  "theta_use", "model_ndays", "model_seed", "global_n", "N_SIMS",
+  "simulate_epidemic_observed", "simulate_epidemic_calib"
+))
 
-# Function to create R script for each job
-create_r_script <- function(chunk_id, sim_ids) {
-  script_content <- paste0("
-# Load required libraries
-library(epiworldR)
-library(data.table)
-library(parallel)
+# Load required libraries on each worker
+clusterEvalQ(cl, {
+  library(epiworldR)
+  library(data.table)
+})
 
-# Source the main simulation function
-source('simulation_functions.R')
+# Convert theta_use to a list of numeric vectors for parallel processing
+param_list <- lapply(1:nrow(theta_use), function(i) as.numeric(theta_use[i, ]))
 
-# Get the simulation IDs for this job
-sim_ids <- c(", paste(sim_ids, collapse = ", "), ")
+# Run simulations in parallel
+cat("Running", N_SIMS, "simulations in parallel...\n")
+start_time <- Sys.time()
 
-# Run simulations for this chunk
-results_list <- list()
-for (i in seq_along(sim_ids)) {
-  results_list[[i]] <- simulate_and_calibrate_slurm(sim_ids[i])
-}
+results_list <- parLapply(cl, 1:N_SIMS, function(i) {
+  simulate_and_calibrate(param_list[[i]], i)
+})
 
-# Save results
-saveRDS(results_list, paste0('chunk_', ", chunk_id, ", '_results.rds'))
-")
-  
-  writeLines(script_content, paste0("slurm_scripts/job_", chunk_id, ".R"))
-}
+end_time <- Sys.time()
+cat("Parallel execution completed in", round(difftime(end_time, start_time, units = "mins"), 2), "minutes\n")
 
-# Create bash script for each job
-create_bash_script <- function(chunk_id) {
-  bash_content <- paste0("#!/bin/bash
-#SBATCH --job-name=epidemic_sim_", chunk_id, "
-#SBATCH --partition=notchpeak-freecycle
-#SBATCH --time=04:00:00
-#SBATCH --mem-per-cpu=4G
-#SBATCH --cpus-per-task=1
-#SBATCH --ntasks=1
-#SBATCH --output=slurm_output/job_", chunk_id, ".out
-#SBATCH --error=slurm_output/job_", chunk_id, ".err
+# Stop the cluster
+stopCluster(cl)
 
-# Load R module if needed (uncomment and modify as needed)
-# module load R
-
-# Run the R script
-cd $SLURM_SUBMIT_DIR
-Rscript slurm_scripts/job_", chunk_id, ".R
-")
-  
-  writeLines(bash_content, paste0("slurm_scripts/job_", chunk_id, ".sh"))
-}
-
-# Create a separate file with all the functions
-functions_content <- "
 # --------------------------
-# All simulation functions from above
+# Extract and Save Parameter Results
+# --------------------------
+# Extract and combine all daily results
+cat("Processing results...\n")
+daily_results <- bind_rows(lapply(results_list, function(x) x$daily_results))
+
+# Extract and combine all parameter comparisons
+param_comparisons <- bind_rows(lapply(results_list, function(x) x$param_comparison))
+
+# Extract and combine all ABC parameter values
+abc_parameters <- bind_rows(lapply(results_list, function(x) x$abc_parameters))
+
+# Save the parameter results (this is what you specifically requested)
+saveRDS(abc_parameters, "abc_predicted_parameters_100_fixedrecn.rds")
+write.csv(abc_parameters, "abc_predicted_parameters_100_fixedrecn.csv", row.names = FALSE)
+
+# Also save the other results for completeness
+write.csv(daily_results, "abc_daily_results.csv", row.names = FALSE)
+write.csv(param_comparisons, "abc_param_comparisons.csv", row.names = FALSE)
+
+# --------------------------
+# Calculate Coverage and Confidence Intervals
+# --------------------------
+# Function to calculate confidence interval
+calc_CI <- function(values, conf_level = 0.95) {
+  # Calculate the mean
+  mean_val <- mean(values, na.rm = TRUE)
+  
+  # Calculate standard error
+  n <- length(values[!is.na(values)])
+  se <- sd(values, na.rm = TRUE) / sqrt(n)
+  
+  # Calculate quantile-based confidence intervals
+  lower_ci <- quantile(values, 0.025, na.rm = TRUE)
+  upper_ci <- quantile(values, 0.975, na.rm = TRUE)
+  
+  return(c(mean = mean_val, lower_ci = lower_ci, upper_ci = upper_ci, se = se))
+}
+
+# For each day, calculate stats across simulations
+coverage_stats <- data.frame(day = 0:model_ndays)
+
+for (day_num in 0:model_ndays) {
+  day_data <- daily_results %>% filter(day == day_num)
+  
+  # Extract observed and predicted values for this day
+  observed_values <- day_data$observed_infected
+  abc_predicted_values <- day_data$abc_predicted_infected
+  
+  # Calculate confidence intervals for observed values
+  obs_ci <- calc_CI(observed_values)
+  coverage_stats$obs_mean[coverage_stats$day == day_num] <- obs_ci["mean"]
+  coverage_stats$obs_lower_ci[coverage_stats$day == day_num] <- obs_ci["lower_ci"]
+  coverage_stats$obs_upper_ci[coverage_stats$day == day_num] <- obs_ci["upper_ci"]
+  
+  # Calculate confidence intervals for ABC predicted values
+  abc_pred_ci <- calc_CI(abc_predicted_values)
+  coverage_stats$abc_pred_mean[coverage_stats$day == day_num] <- abc_pred_ci["mean"]
+  coverage_stats$abc_pred_lower_ci[coverage_stats$day == day_num] <- abc_pred_ci["lower_ci"]
+  coverage_stats$abc_pred_upper_ci[coverage_stats$day == day_num] <- abc_pred_ci["upper_ci"]
+  
+  # Calculate coverage for ABC
+  abc_coverage <- mean(abc_predicted_values >= obs_ci["lower_ci"] & 
+                         abc_predicted_values <= obs_ci["upper_ci"], na.rm = TRUE) * 100
+  coverage_stats$abc_coverage[coverage_stats$day == day_num] <- abc_coverage
+}
+
+# Calculate daily statistics across simulations
+daily_stats <- daily_results %>%
+  group_by(day) %>%
+  summarize(
+    mean_observed = mean(observed_infected),
+    abc_mean_predicted = mean(abc_predicted_infected),
+    abc_mean_bias = mean(abc_bias),
+    abc_mean_abs_bias = mean(abs(abc_bias)),
+    n_sims = n()
+  )
+
+# Join with coverage statistics
+daily_stats <- left_join(daily_stats, coverage_stats, by = "day")
+
+# Save the aggregated statistics
+write.csv(daily_stats, "abc_daily_stats.csv", row.names = FALSE)
+
+# --------------------------
+# Basic Visualization - ABC Only
 # --------------------------
 
-# Global variables
-model_ndays <- 60
-model_seed <- 122
-global_n <- 5000
+# 1. Bias plot
+bias_plot <- ggplot(daily_stats, aes(x = day)) +
+  geom_line(aes(y = abc_mean_bias), size = 1, color = "blue") +
+  geom_hline(yintercept = 0, color = "black", linetype = "dashed") +
+  labs(title = "Mean Bias in ABC Calibration",
+       subtitle = paste(N_SIMS, "simulations"),
+       x = "Day", y = "Mean Bias (Predicted - Observed)") +
+  theme_minimal()
 
-# Function to simulate the \"observed\" epidemic
-simulate_epidemic_observed <- function(params, ndays = model_ndays, seed = NULL) {
-  if (!is.null(seed)) set.seed(seed)
+# 2. Epidemic curves 
+epidemic_curve_plot <- ggplot(daily_stats, aes(x = day)) +
+  geom_line(aes(y = obs_mean, color = "Observed"), size = 1) +
+  geom_line(aes(y = abc_pred_mean, color = "ABC"), size = 1, linetype = "dashed") +
+  geom_ribbon(aes(ymin = abc_pred_lower_ci, ymax = abc_pred_upper_ci), fill = "blue", alpha = 0.1) +
+  scale_color_manual(values = c("Observed" = "black", "ABC" = "blue")) +
+  labs(title = "Epidemic Curves: Observed vs ABC",
+       subtitle = paste("Based on", N_SIMS, "simulations"),
+       x = "Day", y = "Infected Count") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+# 3. Parameter recovery comparison plots
+param_plots <- list()
+params <- c("contact_rate", "recovery_rate", "transmission_prob")
+
+for (param in params) {
+  param_data <- param_comparisons[param_comparisons$parameter == param, ]
   
-  # Initialize the model with the true parameters
-  sim_model <- ModelSIRCONN(
-    name              = \"sim\",
-    n                 = as.integer(params[1]),
-    prevalence        = params[2],
-    contact_rate      = params[3],
-    transmission_rate = params[5],
-    recovery_rate     = params[4]
-  )
+  p <- ggplot(param_data, aes(x = true_value)) +
+    geom_point(aes(y = abc_calibrated_value), alpha = 0.6, color = "blue") +
+    geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed") +
+    labs(title = str_to_title(gsub("_", " ", param)),
+         x = "True Value", 
+         y = "ABC Estimated Value") +
+    theme_minimal()
   
-  verbose_off(sim_model)
-  
-  # Run the simulation
-  run(sim_model, ndays = ndays)
-  
-  # Get only the infected counts
-  counts <- get_hist_total(sim_model)
-  infected_counts <- counts[counts\$state == \"Infected\", \"counts\"]
-  
-  return(infected_counts)
+  param_plots[[param]] <- p
 }
 
-# Function for simulation during calibration
-simulate_epidemic_calib <- function(params, ndays = model_ndays, seed = NULL) {
-  if (!is.null(seed)) set.seed(seed)
-  
-  # Initialize model with calibration parameters
-  sim_model <- ModelSIRCONN(
-    name              = \"sim\",
-    n                 = as.integer(global_n),
-    prevalence        = params[1],
-    contact_rate      = params[2],
-    transmission_rate = params[4],
-    recovery_rate     = params[3]
+# Calculate aggregate statistics for parameter estimation
+param_stats <- param_comparisons %>%
+  group_by(parameter) %>%
+  summarize(
+    mean_true = mean(true_value, na.rm = TRUE),
+    mean_abc = mean(abc_calibrated_value, na.rm = TRUE),
+    mean_abc_error_pct = mean(abc_error_pct, na.rm = TRUE),
+    rmse_abc = sqrt(mean((abc_calibrated_value - true_value)^2, na.rm = TRUE))
   )
-  
-  verbose_off(sim_model)
-  
-  # Run the simulation
-  run(sim_model, ndays = ndays)
-  
-  # Get only the infected counts
-  counts <- get_hist_total(sim_model)
-  infected_counts <- counts[counts\$state == \"Infected\", \"counts\"]
-  
-  return(infected_counts)
+
+# Save parameter statistics
+write.csv(param_stats, "abc_parameter_statistics.csv", row.names = FALSE)
+
+# Save plots
+ggsave("abc_bias.png", plot = bias_plot, width = 10, height = 6)
+ggsave("abc_epidemic_curve.png", plot = epidemic_curve_plot, width = 10, height = 6)
+
+# Save individual parameter plots
+for (param in params) {
+  ggsave(paste0("abc_", param, "_recovery.png"), plot = param_plots[[param]], width = 8, height = 6)
 }
 
-# ABC functions
-simulation_fun <- function(params, lfmcmc_obj) {
-  sim_params <- c(
-    true_params[2],  # prevalence (fixed at true value)
-    params[1],       # contact_rate
-    params[2],       # recovery_rate
-    params[3]        # transmission_prob
-  )
-  
-  infected_counts <- simulate_epidemic_calib(sim_params, ndays = model_ndays)
-  return(as.numeric(infected_counts))
-}
-
-summary_fun <- function(data, lfmcmc_obj) {
-  return(as.numeric(data))
-}
-
-proposal_fun <- function(old_params, lfmcmc_obj) {
-  new_crate <- old_params[1] * exp(rnorm(1, sd = 0.1))
-  new_recov <- old_params[2] * exp(rnorm(1, sd = 0.1))
-  new_ptran <- plogis(qlogis(old_params[3]) + rnorm(1, sd = 0.1))
-  
-  return(c(new_crate, new_recov, new_ptran))
-}
-
-kernel_fun <- function(simulated_stat, observed_stat, epsilon, lfmcmc_obj) {
-  diff <- sum((simulated_stat - observed_stat)^2)
-  return(exp(-diff / (2 * epsilon^2)))
-}
-
-# Main simulation function
-simulate_and_calibrate_slurm <- function(sim_id) {
-  theta_use <- readRDS(\"theta_use.rds\")
-  true_params <- as.numeric(theta_use[sim_id])
-  
-  cat(\"Running simulation\", sim_id, \"of\", nrow(theta_use), \"\\n\")
-  
-  true_R0 <- (true_params[3] * true_params[5]) / true_params[4]
-  
-  observed_infected <- simulate_epidemic_observed(true_params, ndays = model_ndays, 
-                                                  seed = model_seed + sim_id)
-  
-  dummy_model <- ModelSIRCONN(
-    name              = \"dummy\",
-    n                 = as.integer(global_n),
-    prevalence        = 0.1,
-    contact_rate      = 5.0,
-    transmission_rate = 0.1,
-    recovery_rate     = 0.1
-  )
-  
-  true_params <<- true_params
-  
-  lfmcmc_obj <- LFMCMC(dummy_model)
-  lfmcmc_obj <- set_simulation_fun(lfmcmc_obj, simulation_fun)
-  lfmcmc_obj <- set_summary_fun(lfmcmc_obj, summary_fun)
-  lfmcmc_obj <- set_proposal_fun(lfmcmc_obj, proposal_fun)
-  lfmcmc_obj <- set_kernel_fun(lfmcmc_obj, kernel_fun)
-  lfmcmc_obj <- set_observed_data(lfmcmc_obj, observed_infected)
-  
-  init_params <- c(
-    true_params[3],
-    true_params[4],
-    true_params[5]
-  )
-  
-  n_samples_calib <- 500
-  epsilon <- sqrt(sum(observed_infected^2)) * 0.05
-  
-  run_lfmcmc(
-    lfmcmc = lfmcmc_obj,
-    params_init = init_params,
-    n_samples = n_samples_calib,
-    epsilon = epsilon,
-    seed = model_seed + sim_id + 100
-  )
-  
-  accepted <- get_all_accepted_params(lfmcmc_obj)
-  
-  if (!is.null(accepted) && nrow(accepted) > 0) {
-    calibrated_params_raw <- apply(accepted, 2, median)
-    abc_crate <- calibrated_params_raw[1]
-    abc_recov <- calibrated_params_raw[2]
-    abc_ptran <- calibrated_params_raw[3]
-    abc_preval <- true_params[2]
-    abc_R0 <- true_R0
-    calibrated_params <- c(abc_preval, abc_crate, abc_recov, abc_ptran)
-  } else {
-    calibrated_params <- true_params[2:5]
-    abc_R0 <- true_R0
-    abc_crate <- true_params[3]
-    cat(\"Warning: Using true parameters as calibration failed for simulation\", sim_id, \"\\n\")
-  }
-  
-  abc_predicted_infected <- simulate_epidemic_calib(calibrated_params, ndays = model_ndays, 
-                                                    seed = model_seed + sim_id + 200)
-  
-  days <- 0:model_ndays
-  daily_results <- data.frame(
-    sim_id = sim_id,
-    day = days,
-    true_preval = true_params[2],
-    true_crate = true_params[3],
-    true_recov = true_params[4],
-    true_ptran = true_params[5],
-    true_R0 = true_R0,
-    calib_preval = calibrated_params[1],
-    calib_crate = calibrated_params[2],
-    calib_recov = calibrated_params[3],
-    calib_ptran = calibrated_params[4],
-    calib_R0 = abc_R0,
-    observed_infected = observed_infected,
-    abc_predicted_infected = abc_predicted_infected,
-    abc_bias = abc_predicted_infected - observed_infected,
-    abc_rel_bias = ifelse(observed_infected > 0, 
-                          (abc_predicted_infected - observed_infected) / observed_infected, 
-                          NA)
-  )
-  
-  param_comparison <- data.frame(
-    sim_id = sim_id,
-    parameter = c(\"contact_rate\", \"recovery_rate\", \"transmission_prob\"),
-    true_value = c(true_params[3:5]),
-    abc_calibrated_value = c(abc_crate, abc_recov, abc_ptran),
-    abc_error_pct = c(
-      (abc_crate - true_params[3]) / true_params[3] * 100,
-      (abc_recov - true_params[4]) / true_params[4] * 100,
-      (abc_ptran - true_params[5]) / true_params[5] * 100
-    )
-  )
-  
-  abc_parameters <- data.frame(
-    sim_id = sim_id,
-    true_preval = true_params[2],
-    true_crate = true_params[3],
-    true_recov = true_params[4],
-    true_ptran = true_params[5],
-    true_R0 = true_R0,
-    abc_preval = calibrated_params[1],
-    abc_crate = calibrated_params[2],
-    abc_recov = calibrated_params[3],
-    abc_ptran = calibrated_params[4],
-    abc_R0 = abc_R0
-  )
-  
-  return(list(
-    daily_results = daily_results,
-    param_comparison = param_comparison,
-    abc_parameters = abc_parameters
-  ))
-}
-"
-
-writeLines(functions_content, "simulation_functions.R")
-
-# Create R and bash scripts for each chunk
-for (i in seq_along(sim_chunks)) {
-  create_r_script(i, sim_chunks[[i]])
-  create_bash_script(i)
-}
-
-# Create a master script to submit all jobs
-master_script <- paste0("#!/bin/bash
-
-echo \"Submitting ", length(sim_chunks), " jobs to Slurm...\"
-
-# Submit all jobs
-job_ids=()
-for i in {1..", length(sim_chunks), "}; do
-  job_id=$(sbatch --parsable slurm_scripts/job_\${i}.sh)
-  job_ids+=(\$job_id)
-  echo \"Submitted job \$i with ID \$job_id\"
-done
-
-echo \"All jobs submitted. Job IDs: \${job_ids[@]}\"
-
-# Optional: Create a script to check job status
-cat > check_jobs.sh << 'EOF'
-#!/bin/bash
-squeue -u $USER -o \"%.8i %.8T %.4D %.8j %R\"
-EOF
-
-chmod +x check_jobs.sh
-
-echo \"Use './check_jobs.sh' to check job status\"
-echo \"Use 'squeue -u $USER' for detailed status\"
-")
-
-writeLines(master_script, "submit_all_jobs.sh")
-system("chmod +x submit_all_jobs.sh")
-
-# Create a collection script
-collection_script <- "#!/usr/bin/env Rscript
-
-# Load required libraries
-library(dplyr)
-
-# Collect all results
-results_list <- list()
-result_files <- list.files(pattern = \"chunk_.*_results.rds\", full.names = TRUE)
-
-cat(\"Found\", length(result_files), \"result files\\n\")
-
-for (file in result_files) {
-  chunk_results <- readRDS(file)
-  results_list <- c(results_list, chunk_results)
-}
-
-cat(\"Total simulations collected:\", length(results_list), \"\\n\")
-
-# Extract and combine results
-daily_results <- bind_rows(lapply(results_list, function(x) x\$daily_results))
-param_comparisons <- bind_rows(lapply(results_list, function(x) x\$param_comparison))
-abc_parameters <- bind_rows(lapply(results_list, function(x) x\$abc_parameters))
-
-# Save final results
-saveRDS(abc_parameters, \"abc_predicted_parameters_1000_fixedrecn.rds\")
-write.csv(abc_parameters, \"abc_predicted_parameters_1000_fixedrecn.csv\", row.names = FALSE)
-
-cat(\"Results saved to:\\n\")
-cat(\"  - abc_predicted_parameters_1000_fixedrecn.rds\\n\")
-cat(\"  - abc_predicted_parameters_1000_fixedrecn.csv\\n\")
-"
-
-writeLines(collection_script, "collect_results.R")
-system("chmod +x collect_results.R")
-
-cat("Setup complete! To run the simulations:\n")
-cat("1. Submit all jobs:     ./submit_all_jobs.sh\n")
-cat("2. Check job status:    ./check_jobs.sh\n")
-cat("3. Collect results:     Rscript collect_results.R\n")
-cat("\nNumber of jobs created:", length(sim_chunks), "\n")
-cat("Simulations per job:", sims_per_job, "\n")
+cat("\nSimulation and calibration complete with ABC only. Predicted parameters saved to 'abc_predicted_parameters_100_fixedrecn.csv' and 'abc_predicted_parameters_100_fixedrecn.rds'!\n")

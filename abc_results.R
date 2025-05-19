@@ -3,7 +3,7 @@ library(tidyverse)
 library(ggplot2)
 summary(abc_predicted_parameters_200)
 
-abc_predicted_parameters_200 <- readRDS("~/Desktop/Sims_calibrate/abc_predicted_parameters_200_fixedrecn.rds")
+abc_predicted_parameters_200 <- readRDS("~/Desktop/Sims_calibrate/abc_predicted_parameters_1000_fixedrecn.rds")
 # 1) Stack true vs abc into one tibble (as before)
 params_all <- abc_predicted_parameters_200 %>%
   select(sim_id,
