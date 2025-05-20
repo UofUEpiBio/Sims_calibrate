@@ -5,7 +5,7 @@ library(epiworldR)
 library(glue)
 source("load_pytorch2.R")
 # 1) load your ABC predictions
-abc_pred <- readRDS("~/Desktop/Sims_calibrate/abc_predicted_parameters_200_fixedrecn.rds")
+abc_pred <- readRDS("~/Desktop/Sims_calibrate/predicted_parameters/abc_predicted_parameters_200_fixedrecn.rds")
 
 # 2) constants
 n        <- 5000
@@ -84,6 +84,7 @@ for (i in 1:nrow(abc_pred)) {
       prevalence_lstm = prevalence_lstm,
       contact_rate_lstm = contact_rate_lstm,
       transmission_rate_lstm = transmission_rate_lstm,
+      R0_lstm=R0_lstm,
       stringsAsFactors = FALSE
     )
     

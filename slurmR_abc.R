@@ -14,7 +14,7 @@ library(cowplot)
 model_ndays <- 60   # simulation duration (days)
 model_seed  <- 122  # seed for reproducibility
 global_n    <- 5000  # population size (used in calibration)
-N_SIMS      <- 100  # number of simulations to run
+N_SIMS      <- 1000  # number of simulations to run
 
 # --------------------------
 # Generate Parameter Sets using Theta
@@ -311,7 +311,6 @@ simulate_and_calibrate <- function(true_params, sim_id) {
     abc_parameters = abc_parameters
   ))
 }
-
 # --------------------------
 # Run Simulations in Parallel
 # --------------------------
@@ -322,7 +321,7 @@ results_list <- list()
 for (i in 1:N_SIMS) {
   results_list[[i]] <- simulate_and_calibrate(as.numeric(theta_use[i]), i)
 }
-
+ans=list()
 library(slurmR)
 
 # Make sure all needed variables/functions are in the global environment
@@ -333,7 +332,7 @@ ans <- Slurm_lapply(
   X = 1:N_SIMS,
   FUN = function(i) simulate_and_calibrate(as.numeric(theta_use[i]), i),
   job_name = "Sims_calibrate",
-  njobs = N_SIMS,
+  njobs = 100,
   overwrite = TRUE,
   plan = "submit",
   sbatch_opt = list(
@@ -359,7 +358,7 @@ ans <- Slurm_lapply(
     "N_SIMS"
   )
 )
-
+N_SIMS=100
 # Once completed, collect results
 results_list <- Slurm_collect(ans)
 
@@ -378,8 +377,8 @@ param_comparisons <- bind_rows(lapply(results_list, function(x) x$param_comparis
 abc_parameters <- bind_rows(lapply(results_list, function(x) x$abc_parameters))
 
 # Save the parameter results (this is what you specifically requested)
-saveRDS(abc_parameters, "abc_predicted_parameters_1000_fixedrecn.rds")
-write.csv(abc_parameters, "abc_predicted_parameters_1000_fixedrecn.csv", row.names = FALSE)
+saveRDS(abc_parameters, "abc_predicted_parameters_1000_fixedrecn_slurm.rds")
+write.csv(abc_parameters, "abc_predicted_parameters_1000_fixedrecn_slurm.csv", row.names = FALSE)
 
 
 
