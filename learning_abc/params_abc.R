@@ -1,53 +1,10 @@
-# Load required libraries
-library(epiworldR)
-library(data.table)
-library(parallel)
-library(ggplot2)
-library(dplyr)
-library(tidyverse)
-library(gridExtra)
-library(cowplot)
-
-# --------------------------
-# Global Simulation Settings
-# --------------------------
-model_ndays <- 60   # simulation duration (days)
-model_seed  <- 122  # seed for reproducibility
-global_n    <- 5000  # population size (used in calibration)
-N_SIMS      <- 1000  # number of simulations to run
-
-# --------------------------
-# Generate Parameter Sets using Theta
-# --------------------------
-set.seed(model_seed)  # Ensure reproducibility
-n_values <- rep(5000, N_SIMS)  # population size (constant at 10000)
-theta <- data.table(
-  n      = n_values,
-  preval = sample(100:2000, N_SIMS, replace = TRUE) / n_values,
-  crate  = runif(N_SIMS, 5, 15),
-  recov  = 0.1, #1 / runif(N_SIMS, 4, 14),
-  R0     = runif(N_SIMS, 1, 5)
-)
-# Calculate transmission rate (ptran)
-theta[, ptran := plogis(qlogis(R0 * recov / crate) + rnorm(.N))]
-
-# Use only the needed columns
-theta_use <- theta[, .(n, preval, crate, recov, ptran)]
-
-# Print the true parameter sets for reference
-cat("True parameter sets:\n")
-print(theta_use)
-saveRDS(theta_use, "theta_use.rds")
-
+source("~/Desktop/Sims_calibrate/params_gen_001.R")
 # --------------------------
 # Define Simulation Functions
 # --------------------------
 
 # Function to simulate the "observed" epidemic
 simulate_epidemic_observed <- function(params, ndays = model_ndays, seed = NULL) {
-  library(epiworldR)
-  library(data.table)
-  library(dplyr)
   if (!is.null(seed)) set.seed(seed)
   
   # Initialize the model with the true parameters
@@ -63,7 +20,7 @@ simulate_epidemic_observed <- function(params, ndays = model_ndays, seed = NULL)
   verbose_off(sim_model)
   
   # Run the simulation
-  epiworldR::run(sim_model, ndays = ndays)
+  run(sim_model, ndays = ndays)
   
   # Get only the infected counts
   counts <- get_hist_total(sim_model)
@@ -74,9 +31,6 @@ simulate_epidemic_observed <- function(params, ndays = model_ndays, seed = NULL)
 
 # Function for simulation during calibration
 simulate_epidemic_calib <- function(params, ndays = model_ndays, seed = NULL) {
-  library(epiworldR)
-  library(data.table)
-  library(dplyr)
   if (!is.null(seed)) set.seed(seed)
   
   # Initialize model with calibration parameters
@@ -92,7 +46,7 @@ simulate_epidemic_calib <- function(params, ndays = model_ndays, seed = NULL) {
   verbose_off(sim_model)
   
   # Run the simulation
-  epiworldR::run(sim_model, ndays = ndays)
+  run(sim_model, ndays = ndays)
   
   # Get only the infected counts
   counts <- get_hist_total(sim_model)
@@ -107,9 +61,6 @@ simulate_epidemic_calib <- function(params, ndays = model_ndays, seed = NULL) {
 
 # This function simulates using the proposed parameters and returns all daily infected counts
 simulation_fun <- function(params, lfmcmc_obj) {
-  library(epiworldR)
-  library(data.table)
-  library(dplyr)
   # Extract parameters for simulation
   # We now have: contact_rate, recovery_rate, transmission_prob (3 parameters)
   # prevalence and R0 are not estimated/predicted
@@ -128,17 +79,11 @@ simulation_fun <- function(params, lfmcmc_obj) {
 
 # This returns the observed data (all daily infected counts)
 summary_fun <- function(data, lfmcmc_obj) {
-  library(epiworldR)
-  library(data.table)
-  library(dplyr)
   return(as.numeric(data))
 }
 
 # Generate new parameter proposals
 proposal_fun <- function(old_params, lfmcmc_obj) {
-  library(epiworldR)
-  library(data.table)
-  library(dplyr)
   # Proposals with appropriate step sizes for each parameter
   # old_params contains: contact_rate, recovery_rate, transmission_prob
   
@@ -151,9 +96,6 @@ proposal_fun <- function(old_params, lfmcmc_obj) {
 
 # Kernel function using sum of squared differences across all days
 kernel_fun <- function(simulated_stat, observed_stat, epsilon, lfmcmc_obj) {
-  library(epiworldR)
-  library(data.table)
-  library(dplyr)
   # Calculate the sum of squared differences across all days
   diff <- sum((simulated_stat - observed_stat)^2)
   return(exp(-diff / (2 * epsilon^2)))
@@ -163,9 +105,6 @@ kernel_fun <- function(simulated_stat, observed_stat, epsilon, lfmcmc_obj) {
 # Function: Simulation–Calibration Study with ABC only
 # --------------------------
 simulate_and_calibrate <- function(true_params, sim_id) {
-  library(epiworldR)
-  library(data.table)
-  library(dplyr)
   cat("Running simulation", sim_id, "of", N_SIMS, "\n")
   
   # Calculate true R0 from true parameters
@@ -212,7 +151,7 @@ simulate_and_calibrate <- function(true_params, sim_id) {
   # Adaptive epsilon based on the magnitude of the observed data
   epsilon <- sqrt(sum(observed_infected^2)) * 0.05
   
-  epiworldR::run_lfmcmc(
+  run_lfmcmc(
     lfmcmc = lfmcmc_obj,
     params_init = init_params,
     n_samples = n_samples_calib,
@@ -311,6 +250,7 @@ simulate_and_calibrate <- function(true_params, sim_id) {
     abc_parameters = abc_parameters
   ))
 }
+
 # --------------------------
 # Run Simulations in Parallel
 # --------------------------
@@ -321,48 +261,6 @@ results_list <- list()
 for (i in 1:N_SIMS) {
   results_list[[i]] <- simulate_and_calibrate(as.numeric(theta_use[i]), i)
 }
-ans=list()
-library(slurmR)
-
-# Make sure all needed variables/functions are in the global environment
-# For example, theta_use and simulate_and_calibrate should be defined
-
-# Create a list of simulation indices
-ans <- Slurm_lapply(
-  X = 1:N_SIMS,
-  FUN = function(i) simulate_and_calibrate(as.numeric(theta_use[i]), i),
-  job_name = "Sims_calibrate",
-  njobs = 100,
-  overwrite = TRUE,
-  plan = "submit",
-  sbatch_opt = list(
-    partition = "vegayon-shared-np",
-    account = "vegayon-np",
-    time = "01:00:00",
-    `mem-per-cpu` = "4G",
-    `cpus-per-task` = 1
-  ),
-  export = c(
-    "simulate_and_calibrate",
-    "simulate_epidemic_observed",
-    "simulate_epidemic_calib",
-    "simulation_fun",
-    "summary_fun",
-    "proposal_fun",
-    "kernel_fun",
-    #"get_all_accepted_params",
-    "theta_use",
-    "model_ndays",
-    "model_seed",
-    "global_n",
-    "N_SIMS"
-  )
-)
-N_SIMS=100
-# Once completed, collect results
-results_list <- Slurm_collect(ans)
-
-# Clean up temporary job files
 
 # --------------------------
 # Extract and Save Parameter Results
@@ -377,8 +275,8 @@ param_comparisons <- bind_rows(lapply(results_list, function(x) x$param_comparis
 abc_parameters <- bind_rows(lapply(results_list, function(x) x$abc_parameters))
 
 # Save the parameter results (this is what you specifically requested)
-saveRDS(abc_parameters, "abc_predicted_parameters_1000_fixedrecn_slurm.rds")
-write.csv(abc_parameters, "abc_predicted_parameters_1000_fixedrecn_slurm.csv", row.names = FALSE)
+saveRDS(abc_parameters, "abc_predicted_parameters_1000_fixedrecn.rds")
+write.csv(abc_parameters, "abc_predicted_parameters_1000_fixedrecn.csv", row.names = FALSE)
 
 
 

@@ -1,18 +1,17 @@
-# ── SCRIPT: compare_true_abc_lstm_fixed.R ───────────────────────────────────
+# ───────────────────────────────────
 
 library(tidyverse)
 library(epiworldR)
 library(glue)
-source("~/Desktop/Sims_calibrate/loading_lstm_model.R")
+source("~/Desktop/Sims_calibrate/loading_lstm_model_003.R")
 # 1) load your ABC predictions
-abc_pred <- readRDS("~/Desktop/Sims_calibrate/predicted_parameters/abc_predicted_parameters_200_fixedrecn.rds")
 
 # 2) constants
-n        <- 5000
-recov    <- 0.1
-ndays    <- 60
+
+
 nsims    <- 1
 nthreads <- 10
+abc_pred <- readRDS(filename)
 
 # 3) Instead of using rowwise(), let's use a for loop for better control
 lstm_results <- vector("list", nrow(abc_pred))
@@ -26,11 +25,11 @@ for (i in 1:nrow(abc_pred)) {
     # a) run a single-rep true SIR
     m0 <- ModelSIRCONN(
       name              = paste0("true_sim_", sim_id),
-      n                 = n,
+      n                 = (abc_pred$true_n[i]),
       prevalence        = abc_pred$true_preval[i],
       contact_rate      = abc_pred$true_crate[i],
       transmission_rate = abc_pred$true_ptran[i],
-      recovery_rate     = recov
+      recovery_rate     = abc_pred$true_recov[i]
     )
     run(m0,ndays = 60)
     incidence <- plot_incidence(m0,plot=FALSE)
@@ -101,24 +100,26 @@ cat(sprintf("Success rate: %.2f%%\n", 100 * nrow(lstm_preds) / nrow(abc_pred)))
 # 4) stack true / abc / lstm
 params_all <- abc_pred %>%
   select(sim_id,
+         true_n,
          prevalence_true        = true_preval,
          contact_rate_true      = true_crate,
          transmission_rate_true = true_ptran,
          recovery_rate_true     = true_recov,
-         R0_true=true_R0,
-         R0_abc=abc_R0,
+         R0_true                = true_R0,
+         R0_abc                 = abc_R0,
          prevalence_abc         = abc_preval,
          contact_rate_abc       = abc_crate,
          transmission_rate_abc  = abc_ptran,
-         recovery_rate_abc      = abc_recov) %>%
-  inner_join(lstm_preds, by = "sim_id") %>% 
-  # Add recovery rate for LSTM (should be 0.1)
-  mutate(recovery_rate_lstm = 0.1)%>%mutate(recovery_rate_abc=0.1) %>%
+         recovery_rate_abc      = true_recov) %>%
+  inner_join(lstm_preds, by = "sim_id") %>%
+  mutate(
+    recovery_rate_lstm = recovery_rate_true                # dummy tag to keep true_n
+  ) %>%
   pivot_longer(
-    cols = -sim_id,
-    names_to     = c(".value","param_type"),
-    names_pattern= "(.*)_(true|abc|lstm)"
-  )
+    cols = -c(sim_id, true_n),  # exclude true_n from pivot
+    names_to = c(".value", "param_type"),
+    names_pattern = "(.*)_(true|abc|lstm)"
+  ) 
 
 # 5) run 20 sims × 60 days for each param_type
 cat("\nRunning forward simulations...\n")
@@ -129,14 +130,14 @@ cat("\nRunning simulations...\n")
 cat("\nRunning simulations...\n")
 all_sims <- params_all %>%
   mutate(run_id = row_number()) %>%
-  pmap_dfr(function(run_id, sim_id, param_type,
+  pmap_dfr(function(run_id, sim_id, true_n,param_type,
                     prevalence, contact_rate,
                     transmission_rate, recovery_rate, R0) {  # Add R0 parameter here
     
     # Create model with the given parameters
     calibrated_model <- ModelSIRCONN(
       name              = paste0("run_", run_id),
-      n                 = n,
+      n                 = true_n,
       prevalence        = prevalence,
       contact_rate      = contact_rate,
       transmission_rate = transmission_rate,
@@ -188,7 +189,7 @@ ggplot(summary_df,
   theme_minimal(base_size = 14)
 
 # Save the plot
-ggsave("comparison_plot.png", width = 10, height = 8, dpi = 300)
+ggsave("~/Desktop/Sims_calibrate/figures/comparison_plot.png", width = 10, height = 8, dpi = 300)
 cat("\nPlot saved as 'comparison_plot.png'\n")
 
 # Save the results
@@ -200,7 +201,7 @@ results_summary <- list(
   summary_statistics = summary_df
 )
 
-saveRDS(results_summary, "comparison_results.rds")
+saveRDS(results_summary, "~/Desktop/Sims_calibrate/figures/comparison_results.rds")
 cat("Results saved as 'comparison_results.rds'\n")
 
 # ── end script ───────────────────────────────────────────────────────────────
@@ -337,3 +338,4 @@ bias_table <- data.frame(
 
 # Print the formatted table
 print(bias_table)
+saveRDS(bias_table,"~/Desktop/Sims_calibrate/figures/bias.rds")

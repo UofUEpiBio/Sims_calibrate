@@ -179,83 +179,83 @@ predict_with_bilstm <- function(time_series, n, recov) {
 
 # 5) Test -----------------------------------------------------------------------
 # Example with a random time series
-set.seed(123)
-example_ts <- runif(60, min = 0, max = 1000)
-result <- predict_with_bilstm(example_ts, n = 5000, recov = 0.1)
-print(result)
-
+# set.seed(123)
+# example_ts <- runif(60, min = 0, max = 1000)
+# result <- predict_with_bilstm(example_ts, n = 5000, recov = 0.1)
+# print(result)
+# 
 # 6) Real data application ------------------------------------------------------
 # Using the model with epiworldR simulated data
-library(epiworldR)
-R0=3
-# Run the original model to get incidence data
-model_sir <- ModelSIRCONN(
-  name = "COVID-19",
-  prevalence = 0.01,
-  n = 5000,
-  contact_rate = 10,
-  transmission_rate = 0.03,
-  recovery_rate = 0.1
-)
-run(model_sir, ndays = 60)
-incidence <- plot_incidence(model_sir, plot=FALSE)
-infected_original <- incidence[,1]
-infected_original <- infected_original[-1]  # remove day 0
-
-# Input parameters
-recov <- 0.1
-n <- 5000
-
-# Run the prediction with our model
-result <- predict_with_bilstm(infected_original, n, recov)
-print(result)
-
-# Extract predicted parameters
-ptran <- result[1]
-crate <- result[2]
-r0 <- result[3]
-
-# Calculate the correct contact rate to maintain the desired R0
-crate_true <- (r0 * recov) / ptran
-
-# Create and run the calibrated model
-calibrated_model <- ModelSIRCONN(
-  name = "Calibrated COVID-19",
-  prevalence = 0.01,
-  n = n,
-  contact_rate = crate_true,
-  transmission_rate = ptran,
-  recovery_rate = recov
-)
-
-run(calibrated_model, ndays = 60)
-incidence_calib <- plot_incidence(calibrated_model, plot=FALSE)
-infected_calibrated <- incidence_calib[,1]
-infected_calibrated <- infected_calibrated[-1]  # remove day 0
-
-# Plot comparison
-library(ggplot2)
-library(dplyr)
-
-# Align lengths
-min_len <- min(length(infected_original), length(infected_calibrated))
-days <- 1:min_len
-
-# Create plot data frame
-df_plot <- data.frame(
-  Day = rep(days, 2),
-  Infected = c(infected_original[1:min_len], infected_calibrated[1:min_len]),
-  Model = rep(c("Original", "Calibrated"), each = min_len)
-)
-
-# Plot
-ggplot(df_plot, aes(x = Day, y = Infected, color = Model, linetype = Model)) +
-  geom_line(size = 1.2) +
-  labs(
-    title = "Infected Over Time: Original vs Calibrated Model",
-    x = "Day",
-    y = "Number of Infected Individuals"
-  ) +
-  theme_minimal() +
-  scale_color_manual(values = c("Original" = "blue", "Calibrated" = "red")) +
-  theme(legend.title = element_blank())
+# library(epiworldR)
+# R0=theta_use[1,3]*theta_use[1,5]/theta_use[1,4]
+# # Run the original model to get incidence data
+# model_sir <- ModelSIRCONN(
+#   name = "COVID-19",
+#   prevalence = 0.0413,
+#   n = 6967,
+#   contact_rate = 1.83,
+#   transmission_rate = 0.52,
+#   recovery_rate = 0.238
+# )
+# run(model_sir, ndays = 60)
+# incidence <- plot_incidence(model_sir, plot=FALSE)
+# infected_original <- incidence[,1]
+# infected_original <- infected_original[-1]  # remove day 0
+# 
+# # Input parameters
+# recov <- 0.238
+# n <- 6967
+# 
+# # Run the prediction with our model
+# result <- predict_with_bilstm(infected_original, n, recov)
+# print(result)
+# 
+# # Extract predicted parameters
+# ptran <- result[1]
+# crate <- result[2]
+# r0 <- result[3]
+# # # 
+# # # # Calculate the correct contact rate to maintain the desired R0
+# crate_true <- (r0 * recov) / ptran
+# # # 
+# # Create and run the calibrated model
+# calibrated_model <- ModelSIRCONN(
+#   name = "Calibrated COVID-19",
+#   prevalence = 0.01,
+#   n = n,
+#   contact_rate = crate_true,
+#   transmission_rate = ptran,
+#   recovery_rate = recov
+# )
+# 
+# run(calibrated_model, ndays = 60)
+# incidence_calib <- plot_incidence(calibrated_model, plot=FALSE)
+# infected_calibrated <- incidence_calib[,1]
+# infected_calibrated <- infected_calibrated[-1]  # remove day 0
+# 
+# # Plot comparison
+# library(ggplot2)
+# library(dplyr)
+# 
+# # Align lengths
+# min_len <- min(length(infected_original), length(infected_calibrated))
+# days <- 1:min_len
+# 
+# # Create plot data frame
+# df_plot <- data.frame(
+#   Day = rep(days, 2),
+#   Infected = c(infected_original[1:min_len], infected_calibrated[1:min_len]),
+#   Model = rep(c("Original", "Calibrated"), each = min_len)
+# )
+# 
+# # Plot
+# ggplot(df_plot, aes(x = Day, y = Infected, color = Model, linetype = Model)) +
+#   geom_line(size = 1.2) +
+#   labs(
+#     title = "Infected Over Time: Original vs Calibrated Model",
+#     x = "Day",
+#     y = "Number of Infected Individuals"
+#   ) +
+#   theme_minimal() +
+#   scale_color_manual(values = c("Original" = "blue", "Calibrated" = "red")) +
+#   theme(legend.title = element_blank())
