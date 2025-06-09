@@ -8,11 +8,11 @@ source("~/Desktop/Sims_calibrate/loading_lstm_model_003.R")
 
 # 2) constants
 
-
+filename <- paste0("~/Desktop/Sims_calibrate/abc_parameters.csv")
+ndays=60
 nsims    <- 1
 nthreads <- 10
-abc_pred <- readRDS(filename)
-
+abc_pred <- read_csv(filename)
 # 3) Instead of using rowwise(), let's use a for loop for better control
 lstm_results <- vector("list", nrow(abc_pred))
 
@@ -46,7 +46,7 @@ for (i in 1:nrow(abc_pred)) {
     
   
     # c) predict parameters
-    lstm_out <- predict_with_bilstm(ts, n, recov)
+    lstm_out <- predict_with_bilstm(ts, abc_pred$true_n[i], abc_pred$true_recov[i])
     
     # Extract values from LSTM output (ptran, crate, R0)
     ptran_lstm <- lstm_out[1]
@@ -57,7 +57,7 @@ for (i in 1:nrow(abc_pred)) {
     # Formula: R0 = (contact_rate * transmission_rate) / recovery_rate
     # So: contact_rate = (R0 * recovery_rate) / transmission_rate
     prevalence_lstm <- abc_pred$true_preval[i]  # Use true prevalence
-    contact_rate_lstm <- (R0_lstm * recov) / ptran_lstm  # Calculate from R0
+    contact_rate_lstm <- (R0_lstm * abc_pred$true_recov[i]) / ptran_lstm  # Calculate from R0
     transmission_rate_lstm <- ptran_lstm  # Use directly from LSTM
     
     # Store results
@@ -110,7 +110,7 @@ params_all <- abc_pred %>%
          prevalence_abc         = abc_preval,
          contact_rate_abc       = abc_crate,
          transmission_rate_abc  = abc_ptran,
-         recovery_rate_abc      = true_recov) %>%
+         recovery_rate_abc      = abc_recov) %>%
   inner_join(lstm_preds, by = "sim_id") %>%
   mutate(
     recovery_rate_lstm = recovery_rate_true                # dummy tag to keep true_n
@@ -121,6 +121,7 @@ params_all <- abc_pred %>%
     names_pattern = "(.*)_(true|abc|lstm)"
   ) 
 
+write.csv(params_all, "params_all.csv", row.names = FALSE)
 # 5) run 20 sims × 60 days for each param_type
 cat("\nRunning forward simulations...\n")
 # Modify your pmap_dfr function to include R0 as a parameter
@@ -210,132 +211,6 @@ cat("Results saved as 'comparison_results.rds'\n")
 # Calculate bias between ABC/LSTM parameters and true parameters
 cat("\nCalculating parameter biases...\n")
 
-# First, ensure we have R0 for all parameter sets if not already calculated
-params_all <- params_all %>%
-  mutate(
-    # Calculate R0 as contact_rate * transmission_rate / recovery_rate if not already there
-    R0 = contact_rate * transmission_rate / recovery_rate
-  )
 
-# Reshape the data to wide format to make comparisons easier
-params_wide <- params_all %>%
-  select(sim_id, param_type, prevalence, contact_rate, transmission_rate, recovery_rate, R0) %>%
-  pivot_wider(
-    id_cols = sim_id,
-    names_from = param_type,
-    values_from = c(prevalence, contact_rate, transmission_rate, recovery_rate, R0)
-  )
 
-# Calculate absolute and relative biases for each parameter
-param_biases <- params_wide %>%
-  mutate(
-    # Absolute biases
-    abs_bias_prevalence_abc = prevalence_abc - prevalence_true,
-    abs_bias_contact_rate_abc = contact_rate_abc - contact_rate_true,
-    abs_bias_transmission_rate_abc = transmission_rate_abc - transmission_rate_true,
-    abs_bias_recovery_rate_abc = recovery_rate_abc - recovery_rate_true,
-    abs_bias_R0_abc = R0_abc - R0_true,
-    
-    # Relative biases (as proportions, not percentages)
-    rel_bias_prevalence_abc = (prevalence_abc - prevalence_true) / prevalence_true,
-    rel_bias_contact_rate_abc = (contact_rate_abc - contact_rate_true) / contact_rate_true,
-    rel_bias_transmission_rate_abc = (transmission_rate_abc - transmission_rate_true) / transmission_rate_true,
-    rel_bias_recovery_rate_abc = (recovery_rate_abc - recovery_rate_true) / recovery_rate_true,
-    rel_bias_R0_abc = (R0_abc - R0_true) / R0_true,
-    
-    # Also calculate for LSTM if needed
-    abs_bias_prevalence_lstm = prevalence_lstm - prevalence_true,
-    abs_bias_contact_rate_lstm = contact_rate_lstm - contact_rate_true,
-    abs_bias_transmission_rate_lstm = transmission_rate_lstm - transmission_rate_true,
-    abs_bias_recovery_rate_lstm = recovery_rate_lstm - recovery_rate_true,
-    abs_bias_R0_lstm = R0_lstm - R0_true,
-    
-    rel_bias_prevalence_lstm = (prevalence_lstm - prevalence_true) / prevalence_true,
-    rel_bias_contact_rate_lstm = (contact_rate_lstm - contact_rate_true) / contact_rate_true,
-    rel_bias_transmission_rate_lstm = (transmission_rate_lstm - transmission_rate_true) / transmission_rate_true,
-    rel_bias_recovery_rate_lstm = (recovery_rate_lstm - recovery_rate_true) / recovery_rate_true,
-    rel_bias_R0_lstm = (R0_lstm - R0_true) / R0_true
-  )
 
-# Summarize the biases
-bias_summary <- param_biases %>%
-  summarise(
-    # ABC Absolute bias statistics
-    mean_abs_bias_prevalence_abc = mean(abs_bias_prevalence_abc),
-    mean_abs_bias_contact_rate_abc = mean(abs_bias_contact_rate_abc),
-    mean_abs_bias_transmission_rate_abc = mean(abs_bias_transmission_rate_abc),
-    mean_abs_bias_recovery_rate_abc = mean(abs_bias_recovery_rate_abc),
-    mean_abs_bias_R0_abc = mean(abs_bias_R0_abc),
-    
-    median_abs_bias_prevalence_abc = median(abs_bias_prevalence_abc),
-    median_abs_bias_contact_rate_abc = median(abs_bias_contact_rate_abc),
-    median_abs_bias_transmission_rate_abc = median(abs_bias_transmission_rate_abc),
-    median_abs_bias_recovery_rate_abc = median(abs_bias_recovery_rate_abc),
-    median_abs_bias_R0_abc = median(abs_bias_R0_abc),
-    
-    # ABC Relative bias statistics (as proportions)
-    mean_rel_bias_prevalence_abc = mean(rel_bias_prevalence_abc),
-    mean_rel_bias_contact_rate_abc = mean(rel_bias_contact_rate_abc),
-    mean_rel_bias_transmission_rate_abc = mean(rel_bias_transmission_rate_abc),
-    mean_rel_bias_recovery_rate_abc = mean(rel_bias_recovery_rate_abc),
-    mean_rel_bias_R0_abc = mean(rel_bias_R0_abc),
-    
-    median_rel_bias_prevalence_abc = median(rel_bias_prevalence_abc),
-    median_rel_bias_contact_rate_abc = median(rel_bias_contact_rate_abc),
-    median_rel_bias_transmission_rate_abc = median(rel_bias_transmission_rate_abc),
-    median_rel_bias_recovery_rate_abc = median(rel_bias_recovery_rate_abc),
-    median_rel_bias_R0_abc = median(rel_bias_R0_abc),
-    
-    # LSTM statistics - if needed
-    mean_abs_bias_prevalence_lstm = mean(abs_bias_prevalence_lstm),
-    mean_abs_bias_contact_rate_lstm = mean(abs_bias_contact_rate_lstm),
-    mean_abs_bias_transmission_rate_lstm = mean(abs_bias_transmission_rate_lstm),
-    mean_abs_bias_recovery_rate_lstm = mean(abs_bias_recovery_rate_lstm),
-    mean_abs_bias_R0_lstm = mean(abs_bias_R0_lstm),
-    
-    median_abs_bias_prevalence_lstm = median(abs_bias_prevalence_lstm),
-    median_abs_bias_contact_rate_lstm = median(abs_bias_contact_rate_lstm),
-    median_abs_bias_transmission_rate_lstm = median(abs_bias_transmission_rate_lstm),
-    median_abs_bias_recovery_rate_lstm = median(abs_bias_recovery_rate_lstm),
-    median_abs_bias_R0_lstm = median(abs_bias_R0_lstm),
-    
-    mean_rel_bias_prevalence_lstm = mean(rel_bias_prevalence_lstm),
-    mean_rel_bias_contact_rate_lstm = mean(rel_bias_contact_rate_lstm),
-    mean_rel_bias_transmission_rate_lstm = mean(rel_bias_transmission_rate_lstm),
-    mean_rel_bias_recovery_rate_lstm = mean(rel_bias_recovery_rate_lstm),
-    mean_rel_bias_R0_lstm = mean(rel_bias_R0_lstm),
-    
-    median_rel_bias_prevalence_lstm = median(rel_bias_prevalence_lstm),
-    median_rel_bias_contact_rate_lstm = median(rel_bias_contact_rate_lstm),
-    median_rel_bias_transmission_rate_lstm = median(rel_bias_transmission_rate_lstm),
-    median_rel_bias_recovery_rate_lstm = median(rel_bias_recovery_rate_lstm),
-    median_rel_bias_R0_lstm = median(rel_bias_R0_lstm)
-  )
-
-# Print the summary
-print(bias_summary)
-
-# Create a more readable table for the biases
-bias_table <- data.frame(
-  Parameter = c("Prevalence", "Contact Rate", "Transmission Rate", "Recovery Rate", "R0"),
-  
-  ABC_Mean_Abs_Bias = c(
-    bias_summary$mean_abs_bias_prevalence_abc,
-    bias_summary$mean_abs_bias_contact_rate_abc,
-    bias_summary$mean_abs_bias_transmission_rate_abc,
-    bias_summary$mean_abs_bias_recovery_rate_abc,
-    bias_summary$mean_abs_bias_R0_abc
-  ),
-  
-  LSTM_Mean_Abs_Bias = c(
-    bias_summary$mean_abs_bias_prevalence_lstm,
-    bias_summary$mean_abs_bias_contact_rate_lstm,
-    bias_summary$mean_abs_bias_transmission_rate_lstm,
-    bias_summary$mean_abs_bias_recovery_rate_lstm,
-    bias_summary$mean_abs_bias_R0_lstm
-  )
-)
-
-# Print the formatted table
-print(bias_table)
-saveRDS(bias_table,"~/Desktop/Sims_calibrate/figures/bias.rds")

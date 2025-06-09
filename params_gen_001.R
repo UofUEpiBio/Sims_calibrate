@@ -27,21 +27,21 @@ n_values <- sample(5000:10000, N_SIMS, replace = TRUE)  # population size consta
 
 theta <- data.table(
   n      = n_values,
-  preval = sample(100:2000, N_SIMS, replace = TRUE) / n_values,  # prevalence as a fraction
-  crate  = runif(N_SIMS, 1, 5),       # contact rate
-  recov  = runif(N_SIMS, 0.071, 0.25),# recovery rate (from your stats)
-  R0     = runif(N_SIMS, 1.1, 5)      # basic reproduction number
+  preval = runif(N_SIMS, 0.007, 0.02),
+  crate  = runif(N_SIMS, 1, 5),
+  recov  = runif(N_SIMS, 0.071, 0.25),
+  R0     = runif(N_SIMS, 1.1, 5)
 )
-# Calculate transmission probability (ptran)
 theta[, ptran := (R0 * recov / crate)]
 
+# Calculate transmission probability (ptran)
+
 # Final dataset with needed columns
-theta_use <- theta[, .(n, preval, crate, recov, R0, ptran)]
+theta_use <- theta[, .(n, preval, crate, recov, ptran)]
 
 
 # Use only the needed columns
-theta_use <- theta[, .(n, preval, crate, recov, ptran)]
-
+summary(theta_use)
 # Print the true parameter sets for reference
 # cat("True parameter sets:\n")
 # print(theta_use)

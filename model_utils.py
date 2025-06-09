@@ -11,13 +11,9 @@ _scaler_add = None
 _scaler_tgt = None
 _scaler_inc = None
 _device = torch.device('cpu')
-# Fixed scaling parameters
+# Fixed incidence scaling parameters
 INCIDENCE_MIN = 0
 INCIDENCE_MAX = 5000
-
-# Target parameter ranges (adjust these based on your knowledge of reasonable values)
-TARGET_MINS = [0.0, 0.0, 0.0]  # min values for ptran, crate, R0
-TARGET_MAXS = [1.0, 20.0, 10.0]  # max values for ptran, crate, R0
 
 class BiLSTMModel(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_layers, additional_dim, output_dim, dropout):
@@ -51,67 +47,37 @@ def create_fixed_incidence_scaler(shape):
     scaler.min_ = 0 - scaler.data_min_ * scaler.scale_
     return scaler
 
-def examine_target_scaler(scaler, param_names=['ptran', 'crate', 'R0']):
-    """Print the min/max values from the target scaler for debugging"""
-    print('Target scaler information:')
-    print(f'  data_min_: {scaler.data_min_}')
-    print(f'  data_max_: {scaler.data_max_}')
-    for i, name in enumerate(param_names):
-        print(f'  {name} range: [{scaler.data_min_[i]:.4f}, {scaler.data_max_[i]:.4f}]')
-
-def load_model(model_path, scaler_additional_path, scaler_targets_path, scaler_incidence_path=None,
-               verbose=True, use_fixed_targets=False):
+def load_model(model_path, scaler_additional_path, scaler_targets_path, scaler_incidence_path=None):
     global _model, _scaler_add, _scaler_tgt, _scaler_inc
     try:
-        # Load additional parameters scaler
         _scaler_add = joblib.load(scaler_additional_path)
-        
-        # Load or create target parameters scaler
-        if use_fixed_targets:
-            if verbose:
-                print('Using fixed target parameter ranges:')
-                for i, (name, min_val, max_val) in enumerate(zip(['ptran', 'crate', 'R0'], TARGET_MINS, TARGET_MAXS)):
-                    print(f'  {name}: [{min_val}, {max_val}]')
-            _scaler_tgt = MinMaxScaler()
-            _scaler_tgt.data_min_ = np.array(TARGET_MINS)
-            _scaler_tgt.data_max_ = np.array(TARGET_MAXS)
-            _scaler_tgt.data_range_ = _scaler_tgt.data_max_ - _scaler_tgt.data_min_
-            _scaler_tgt.scale_ = 1.0 / _scaler_tgt.data_range_
-            _scaler_tgt.min_ = 0 - _scaler_tgt.data_min_ * _scaler_tgt.scale_
-        else:
-            _scaler_tgt = joblib.load(scaler_targets_path)
-            if verbose:
-                examine_target_scaler(_scaler_tgt)
+        _scaler_tgt = joblib.load(scaler_targets_path)
         
         # Try to load the incidence scaler if provided
         if scaler_incidence_path:
             try:
                 _scaler_inc = joblib.load(scaler_incidence_path)
-                if verbose:
-                    print('Loaded existing incidence scaler')
+                print('Loaded existing incidence scaler')
             except Exception as e:
-                if verbose:
-                    print(f'Could not load incidence scaler: {e}')
-                    print('Will create fixed scaler during prediction')
+                print(f'Could not load incidence scaler: {e}')
+                print('Will create fixed scaler during prediction')
                 _scaler_inc = None
         else:
             _scaler_inc = None
-            if verbose:
-                print('No incidence scaler provided, will create fixed scaler during prediction')
+            print('No incidence scaler provided, will create fixed scaler during prediction')
         
         # instantiate with training hyperparams
         _model = BiLSTMModel(input_dim=1, hidden_dim=160, num_layers=3, additional_dim=2, output_dim=3, dropout=0.5)
         state = torch.load(model_path, map_location=_device)
         _model.load_state_dict(state)
         _model.to(_device).eval()
-        if verbose:
-            print('Model loaded successfully')
+        print('Model loaded successfully')
     except Exception as e:
         print('Error loading model/scalers:', e)
         traceback.print_exc()
         raise
 
-def predict(seq, additional_pair, return_raw=False):
+def predict(seq, additional_pair):
     try:
         global _scaler_inc
         x = np.asarray(seq, dtype=np.float32)
@@ -161,13 +127,7 @@ def predict(seq, additional_pair, return_raw=False):
         # Run prediction
         with torch.no_grad():
             out = _model(x_t, add_t).cpu().numpy()
-            
-        if return_raw:
-            # Return the raw model outputs (before inverse scaling)
-            return out[0].tolist()
-        else:
-            # Apply inverse scaling to get original parameter values
-            return _scaler_tgt.inverse_transform(out)[0].tolist()
+        return _scaler_tgt.inverse_transform(out)[0].tolist()
     except Exception as e:
         print('Prediction error:', e)
         traceback.print_exc()

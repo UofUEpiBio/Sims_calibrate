@@ -1,4 +1,5 @@
 library(reticulate)
+filename <- paste0("~/Desktop/Sims_calibrate/predicted_parameters/abc_predicted_parameters_slurm.rds")
 
 # 1) Write Python helper (model_utils.py) with fixed incidence scaling ---------------------------------------
 python_code <- c(

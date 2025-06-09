@@ -262,6 +262,43 @@ for (i in 1:N_SIMS) {
   results_list[[i]] <- simulate_and_calibrate(as.numeric(theta_use[i]), i)
 }
 
+library(slurmR)
+
+# FIXED: Complete the Slurm_lapply call
+ans <- Slurm_lapply(
+  X = 1:N_SIMS,
+  FUN = function(i) simulate_and_calibrate(as.numeric(theta_use[i,]), i),  # FIXED: Added comma for row indexing
+  job_name = "Sims_calibrate",
+  njobs = 100,
+  overwrite = TRUE,
+  plan = "submit",
+  sbatch_opt = list(
+    partition = "vegayon-shared-np",
+    account = "vegayon-np",
+    time = "01:00:00",
+    `mem-per-cpu` = "4G",
+    `cpus-per-task` = 1
+  ),
+  export = c(
+    "simulate_and_calibrate",
+    "simulate_epidemic_observed",
+    "simulate_epidemic_calib",
+    "simulation_fun",
+    "summary_fun",
+    "proposal_fun",
+    "kernel_fun",
+    "theta_use",
+    "model_ndays",
+    "model_seed",
+    "global_n",
+    "N_SIMS"
+  )
+)
+
+# FIXED: Complete the results collection
+results_list <- Slurm_collect(ans)
+
+
 # --------------------------
 # Extract and Save Parameter Results
 # --------------------------
