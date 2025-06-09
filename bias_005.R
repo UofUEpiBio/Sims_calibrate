@@ -1,5 +1,5 @@
 library(tidyverse)
-df=params_all
+df=read_csv("params_all.csv")
 # Step 1: Pivot to wide format
 df_wide <- df %>%
   pivot_wider(
