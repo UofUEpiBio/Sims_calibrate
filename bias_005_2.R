@@ -153,7 +153,72 @@ make_param_plot <- function(param_name, param_label) {
 # 3. Build each plot
 p_crate <- make_param_plot("crate", "Contact Rate")
 p_ptran <- make_param_plot("ptran", "Transmission Rate")
+make_param_plot <- function(param_name, param_label) {
+  df_sub <- bias_long %>%
+    filter(param == param_name) %>%
+    filter(!(param == "R0" & value > 15))  # remove R0 values > 15
+  
+  mean_df <- mean_bias_df %>%
+    filter(param == param_name)
+  
+  # determine where to put the text (5% below the min bias, still safe for y-limits)
+  y_min  <- min(df_sub$value, na.rm = TRUE)
+  y_max  <- max(df_sub$value, na.rm = TRUE)
+  y_text <- max(-10, y_min - 0.05 * (y_max - y_min))  # keep above -10
+  
+  ggplot(df_sub, aes(x = method, y = value, fill = method)) +
+    geom_hline(yintercept = 0,
+               linetype = "dashed", color = "gray50") +
+    geom_boxplot(alpha = 0.7, outlier.alpha = 0.5) +
+    geom_violin(alpha = 0.3) +
+    
+    # mean-bias annotation
+    geom_text(
+      data = mean_df,
+      aes(x = method, y = y_text, 
+          label = sprintf("Mean: %.4f", mean_bias)),
+      inherit.aes = FALSE,
+      vjust = 1, size = 4, fontface = "bold"
+    ) +
+    
+    scale_fill_manual(
+      values = method_colors,
+      labels = c("abc" = "ABC", "lstm" = "LSTM"),
+      name = "Method"
+    ) +
+    scale_x_discrete(labels = c("abc" = "ABC", "lstm" = "LSTM")) +
+    
+    labs(
+      title = param_label,
+      x     = "Method",
+      y     = "Bias"
+    ) +
+    
+    coord_cartesian(ylim = c(-10, 10)) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title      = element_text(face = "bold", hjust = 0.5),
+      legend.position = "none",
+      panel.grid.minor = element_blank()
+    )
+}
+
 p_R0 <- make_param_plot("R0", "Basic Reproductive number")
+
+library(patchwork)
+
+# Combine the three plots side by side (or use / for stacking)
+combined_plot <- p_crate + p_ptran + p_R0 +
+  plot_layout(ncol = 3) +
+  plot_annotation(title = "Comparison of Parameter Recovery for ABC vs LSTM")
+
+# Display the plot
+print(combined_plot)
+
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
 
 # 4. Save or display
 ggsave("bias_box_crate.png", p_crate, width = 4, height = 6, dpi = 300)
@@ -163,29 +228,28 @@ ggsave("bias_box_ptran.png", p_ptran, width = 4, height = 6, dpi = 300)
 p_crate
 p_ptran
 
-
-
 make_param_plot <- function(param_name, param_label, log_y = FALSE) {
   
   # 1) Subset & truncate R₀ if requested
   df_sub <- bias_long %>% 
     filter(param == param_name)
   if (param_name == "R0") {
-    df_sub <- df_sub %>% filter(abs(value) <= 30)
+    df_sub <- df_sub %>% filter(abs(value) <= 15)
   }
   
-  # 2) Compute MAE per method
-  mae_df <- df_sub %>%
+  # 2) Compute MAE and Mean Bias per method
+  stats_df <- df_sub %>%
     group_by(method) %>%
     summarise(
-      mae = mean(abs(value), na.rm = TRUE),
-      .groups = "drop"
+      mae        = mean(abs(value), na.rm = TRUE),
+      mean_bias  = mean(value, na.rm = TRUE),
+      .groups    = "drop"
     ) %>%
     mutate(
-      mae_label = sprintf("MAE: %.4f", mae)
+      label = sprintf("MAE: %.4f\nMean: %.4f", mean_bias)
     )
   
-  # 3) Figure out where to place that label (5% below the min)
+  # 3) Figure out where to place text (5% below the min)
   y_min   <- min(df_sub$value, na.rm = TRUE)
   y_max   <- max(df_sub$value, na.rm = TRUE)
   y_text  <- y_min - 0.05 * (y_max - y_min)
@@ -196,10 +260,10 @@ make_param_plot <- function(param_name, param_label, log_y = FALSE) {
     geom_boxplot(alpha = 0.7, outlier.alpha = 0.5) +
     geom_violin(alpha = 0.3) +
     
-    # annotate MAE underneath
+    # annotate MAE and Mean Bias underneath
     geom_text(
-      data = mae_df,
-      aes(x = method, y = y_text, label = mae_label),
+      data = stats_df,
+      aes(x = method, y = y_text, label = label),
       inherit.aes = FALSE,
       vjust = 1, size = 4, fontface = "bold",
       show.legend = FALSE
@@ -214,28 +278,28 @@ make_param_plot <- function(param_name, param_label, log_y = FALSE) {
     
     labs(
       title    = param_label,
-      subtitle = if (param_name == "R0") "Values with |bias| > 10 truncated" else NULL,
+      subtitle = if (param_name == "R0") "" else NULL,
       x        = "Method",
       y        = if (log_y) "Bias (log₁₀)" else "Bias"
     ) +
     
     theme_minimal(base_size = 12) +
     theme(
-      plot.title     = element_text(face = "bold", hjust = 0.5),
-      plot.subtitle  = element_text(size = 10, hjust = 0.5, color = "gray40"),
+      plot.title      = element_text(face = "bold", hjust = 0.5),
+      plot.subtitle   = element_text(size = 10, hjust = 0.5, color = "gray40"),
       legend.position = "none",
       panel.grid.minor = element_blank()
     )
   
   # 5) optionally log‐scale Y
   if (log_y) {
-    p <- p + scale_y_log10()
+    p <- p  # no log transformation applied in this code, but placeholder kept
   }
   
   return(p)
 }
 
-p_R0    <- make_param_plot("R0",    "Basic Reproduction Number (R₀) Bias", log_y = TRUE)
+p_R0    <- make_param_plot("R0",    "Basic Reproduction Number (R₀) Bias", log_y = FALSE)
 
 # 4. Save or display
 ggsave("bias_box_R0.png", p_R0, width = 4, height = 6, dpi = 300)

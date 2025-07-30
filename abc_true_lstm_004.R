@@ -36,7 +36,7 @@ for (i in 1:nrow(abc_pred)) {
     all_counts=incidence[,1]
     
     ts <- all_counts[-1]           # drop day0
-    ts <- ts[1:ndays]              # force exactly 60 values
+    ts <- ts[0:ndays]              # force exactly 60 values
     
     if (length(ts) != ndays) {
       stop(glue("After dropping day0 and subsetting, length(ts) = {length(ts)}, not {ndays}!"))

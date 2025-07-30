@@ -7,7 +7,7 @@ library(dplyr)
 library(tidyverse)
 library(gridExtra)
 library(cowplot)
-
+# Using remotes package (often more reliable)
 # --------------------------
 # Global Simulation Settings
 # --------------------------

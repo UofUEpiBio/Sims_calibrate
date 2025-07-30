@@ -184,7 +184,7 @@ simulate_and_calibrate <- function(true_params, sim_id) {
     )
     
     # Run the LFMCMC
-    n_samples_calib <- 500
+    n_samples_calib <- 2000
     epsilon <- sqrt(sum(observed_infected^2)) * 0.05
     
     epiworldR::run_lfmcmc(
@@ -300,10 +300,13 @@ simulate_and_calibrate <- function(true_params, sim_id) {
 # --------------------------
 
 library(slurmR)
-
+start_time <- Sys.time()
+simulate_and_calibrate(as.numeric(theta_use[1, ]), 1)
+end_time <- Sys.time()
+elapsed <- end_time - start_time
 ans <- Slurm_lapply(
   X = 1:N_SIMS,
-  FUN = function(i) simulate_and_calibrate(as.numeric(theta_use[i,]), i),  # FIXED: Added comma for row indexing
+  FUN = function(i) simulate_and_calibrate(as.numeric(theta_use[i, ]), i),
   job_name = "Sims_calibrate",
   njobs = 100,
   overwrite = TRUE,
@@ -330,6 +333,10 @@ ans <- Slurm_lapply(
     "N_SIMS"
   )
 )
+
+end_time <- Sys.time()
+elapsed <- end_time - start_time
+cat(sprintf("Slurm_lapply() submission took %.2f seconds\n", as.numeric(elapsed, units = "secs")))
 
 # FIXED: Complete the results collection
 results_list <- Slurm_collect(ans)
