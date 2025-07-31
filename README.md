@@ -1,6 +1,5 @@
 
 
----
 
 # Sims\_calibrate
 
@@ -67,7 +66,4 @@ Analyzes parameter predictions to compute bias and create boxplots for parameter
    Rscript 04-parameter-stats.R
    ```
 
----
 
-If you want, I can now give you a **final copy-paste–ready README.md file** so it renders perfectly on GitHub without you having to adjust anything.
-Do you want me to do that now?
