@@ -1,0 +1,166 @@
+
+
+```{r}
+
+
+library(epiworldR)
+library(ggplot2)
+library(data.table)
+
+
+```
+
+
+```{r}
+# Set up initial model parameters
+model_seed <- 122
+model_n <- 2000
+model_ndays <- 50
+
+init_prevalence <- 0.01
+true_r_rate <- 1 / 7
+true_t_rate <- 0.1
+true_c_rate <- 10
+
+# Create SIRCONN model with known parameters
+model_sirconn <- ModelSIRCONN(
+  name              = "COVID-19",
+  n                 = model_n,
+  prevalence        = init_prevalence,
+  contact_rate      = true_c_rate,
+  transmission_rate = true_t_rate,
+  recovery_rate     = true_r_rate
+)
+
+# Run the model
+verbose_off(model_sirconn)
+run(model_sirconn, ndays = model_ndays, seed = model_seed)
+```
+
+
+```{r}
+# Observed data (could be replaced with real data)
+observed_data <- get_today_total(model_sirconn)
+```
+
+
+```{r}
+## --------------------------------------------------------------------
+## LFMCMC SETUP
+## --------------------------------------------------------------------
+
+# Simulation function — rebuilds model each run
+simulation_fun <- function(params, lfmcmc_obj) {
+  r_rate <- params[1]
+  t_rate <- params[2]
+  c_rate <- params[3]
+
+  sim_model <- ModelSIRCONN(
+    name              = "sim",
+    n                 = model_n,
+    prevalence        = init_prevalence,
+    contact_rate      = c_rate,
+    transmission_rate = t_rate,
+    recovery_rate     = r_rate
+  )
+
+  verbose_off(sim_model)
+  run(sim_model, ndays = model_ndays)
+
+  get_today_total(sim_model)
+}
+```
+
+
+```{r}
+# Summary function (identity)
+summary_fun <- function(data, lfmcmc_obj) {
+  return(data)
+}
+
+# Proposal function
+proposal_fun <- function(old_params, lfmcmc_obj) {
+  # Recovery and transmission rate (bounded between 0 and 1)
+  params_1_2 <- plogis(qlogis(old_params[1:2]) + rnorm(2, sd = 0.025))
+  
+  # Contact rate (positive real, unbounded)
+  param_3 <- old_params[3] + rnorm(1, sd = 0.25)
+  param_3 <- ifelse(param_3 < 0, abs(param_3), param_3)  # Reflect if negative
+
+  c(params_1_2, param_3)
+}
+```
+
+
+```{r}
+# Kernel function
+kernel_fun <- function(simulated_stats, observed_stats, epsilon, lfmcmc_obj) {
+  diff <- ((simulated_stats - observed_stats)^2)^epsilon
+  dnorm(sqrt(sum(diff)))
+}
+```
+
+
+```{r}
+## --------------------------------------------------------------------
+## RUN LFMCMC
+## --------------------------------------------------------------------
+
+# Initialize the LFMCMC object
+lfmcmc_obj <- LFMCMC(model_sirconn) |>
+  set_simulation_fun(simulation_fun) |>
+  set_summary_fun(summary_fun) |>
+  set_proposal_fun(proposal_fun) |>
+  set_kernel_fun(kernel_fun) |>
+  set_observed_data(observed_data)
+
+# Initial guess for parameters: r_rate, t_rate, c_rate
+init_params <- c(0.3, 0.3, 10)
+n_samples <- 2000
+epsilon <- 1.0
+```
+
+
+```{r}
+# Run LFMCMC
+run_lfmcmc(
+  lfmcmc = lfmcmc_obj,
+  params_init = init_params,
+  n_samples = n_samples,
+  epsilon = epsilon,
+  seed = model_seed
+)
+
+# Name parameters and stats for pretty print
+set_params_names(lfmcmc_obj, c("Recovery rate", "Transmission rate", "Contact rate"))
+set_stats_names(lfmcmc_obj, c("Susceptible", "Infected", "Recovered"))
+```
+
+
+```{r}
+# Show LFMCMC results
+print(lfmcmc_obj, burnin = 1500)
+```
+
+
+```{r}
+## --------------------------------------------------------------------
+## TRACE PLOT (Optional)
+## --------------------------------------------------------------------
+
+# Plot trace of accepted parameters
+accepted <- get_all_accepted_params(lfmcmc_obj)
+if (!is.null(accepted) && nrow(accepted) > 0) {
+  plot(accepted[,1], type = "l", col = "red", ylab = "Parameter values",
+       xlab = "Iteration", main = "Trace of Parameters", ylim = range(accepted))
+  lines(accepted[,2], col = "blue")
+  lines(accepted[,3], col = "green")
+  legend("topright", legend = c("Recovery", "Transmission", "Contact"),
+         col = c("red", "blue", "green"), lty = 1)
+} else {
+  message("No accepted samples found to plot.")
+}
+
+
+```
+
