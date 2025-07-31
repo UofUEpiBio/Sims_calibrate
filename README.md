@@ -1,69 +1,80 @@
 
+# 📊 Sims\_calibrate
 
+This repository contains R scripts for **parameter generation**, **model loading**, **calibration**, **prediction**, and **analysis** for epidemic simulation studies.
+Whether you want to run simulations 🧮, calibrate predictions 🔍, or visualize epidemic curves 📈 — this project has you covered.
 
-# Sims\_calibrate
+---
 
-This repository contains scripts for parameter generation, model loading, calibration, prediction, and analysis for epidemic simulation studies.
-
-## File Descriptions
+## 📂 File Descriptions
 
 ### `00-params.R`
 
-Generates the simulation parameters used throughout the analysis.
+📝 Generates the **simulation parameters** used throughout the analysis.
 
 ### `01a-bilstm.R`
 
-Loads the pre-trained BiLSTM model for epidemic curve prediction.
+🤖 Loads the **pre-trained BiLSTM model** for epidemic curve prediction.
 
 ### `01b-abc.R`
 
-Applies Approximate Bayesian Computation (ABC) for calibration.
+🎯 Applies **Approximate Bayesian Computation (ABC)** for calibration.
 
 ### `02-abc-bilstm-prediction.R`
 
-Combines ABC calibration with BiLSTM predictions and saves the predicted results.
+🔗 Combines **ABC calibration** with **BiLSTM predictions** and saves the results.
 
 ### `03-epicurves-stats.R`
 
-Uses the predicted parameters to generate epidemic curves for visualization and analysis.
+📈 Generates **epidemic curves** from the predicted parameters.
 
 ### `04-parameter-stats.R`
 
-Analyzes parameter predictions to compute bias and create boxplots for parameter distributions.
+📊 Analyzes predicted parameters to find **bias** and create **boxplots**.
 
-## Project Notes
+---
 
-* **R version:** Ensure you are running a compatible R version with necessary packages installed before running the scripts.
-* **Order of execution:** Scripts are intended to be run in the order listed above for consistent results.
-* **Output:** Prediction results, epidemic curves, and statistical plots are saved to the designated output folders as defined in the scripts.
+## 🛠️ Project Notes
 
-## Getting Started
+* **R version:** Make sure you’re using a compatible R version 📦 with all required packages installed.
+* **Execution order:** Run scripts in the order listed above for consistent results.
+* **Outputs:** Predictions, epidemic curves, and statistical plots are saved in the designated output folders.
 
-1. Generate parameters:
+---
 
-   ```bash
-   Rscript 00-params.R
-   ```
-2. Load model and run calibration:
+## 🚀 Getting Started
 
-   ```bash
-   Rscript 01a-bilstm.R
-   Rscript 01b-abc.R
-   ```
-3. Combine calibration and predictions:
+1️⃣ **Generate parameters**
 
-   ```bash
-   Rscript 02-abc-bilstm-prediction.R
-   ```
-4. Generate epicurves:
+```bash
+Rscript 00-params.R
+```
 
-   ```bash
-   Rscript 03-epicurves-stats.R
-   ```
-5. Analyze parameter statistics:
+2️⃣ **Load model & run calibration**
 
-   ```bash
-   Rscript 04-parameter-stats.R
-   ```
+```bash
+Rscript 01a-bilstm.R
+Rscript 01b-abc.R
+```
+
+3️⃣ **Combine calibration & predictions**
+
+```bash
+Rscript 02-abc-bilstm-prediction.R
+```
+
+4️⃣ **Generate epicurves**
+
+```bash
+Rscript 03-epicurves-stats.R
+```
+
+5️⃣ **Analyze parameter statistics**
+
+```bash
+Rscript 04-parameter-stats.R
+```
 
 
+
+Do you want me to create that diagram for you?
