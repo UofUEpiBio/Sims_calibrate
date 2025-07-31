@@ -1,4 +1,5 @@
 
+
 # 📊 Sims\_calibrate
 
 This repository contains R scripts for **parameter generation**, **model loading**, **calibration**, **prediction**, and **analysis** for epidemic simulation studies.
@@ -34,9 +35,18 @@ Whether you want to run simulations 🧮, calibrate predictions 🔍, or visuali
 
 ---
 
+## 📦 Additional Resources
+
+### `LSTM_model/`
+
+📁 Contains the **pre-trained LSTM models** used for machine learning–based calibration.
+These models are loaded by `01a-bilstm.R` and used to improve prediction accuracy.
+
+---
+
 ## 🛠️ Project Notes
 
-* **R version:** Make sure you’re using a compatible R version 📦 with all required packages installed.
+* **R version:** Ensure you’re using a compatible R version 📦 with all required packages installed.
 * **Execution order:** Run scripts in the order listed above for consistent results.
 * **Outputs:** Predictions, epidemic curves, and statistical plots are saved in the designated output folders.
 
@@ -74,4 +84,3 @@ Rscript 03-epicurves-stats.R
 ```bash
 Rscript 04-parameter-stats.R
 ```
-
