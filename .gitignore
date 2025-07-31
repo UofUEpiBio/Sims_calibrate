@@ -1,0 +1,28 @@
+# R data files
+*.rds
+*.RData
+*.Rhistory
+*.Rproj.user/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Plots and figures
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+*.gif
+
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Other temporary files
+*.tmp
+*.log
