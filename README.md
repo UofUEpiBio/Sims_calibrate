@@ -39,7 +39,7 @@ Whether you want to run simulations 🧮, calibrate predictions 🔍, or visuali
 
 ### `LSTM_model/`
 
-📁 Contains the **pre-trained LSTM models** used for machine learning–based calibration.
+📁 Contains the **pre-trained BiLSTM model** used for machine learning–based calibration.
 These models are loaded by `01a-bilstm.R` and used to improve prediction accuracy.
 
 ---
