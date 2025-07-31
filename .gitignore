@@ -1,21 +1,28 @@
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
-# Ignore these specific project folders
-epiworldRcalibrate/
-bias_coverage_true/
-learning_abc/
-sims_calibrate/
-bias_coverage_lstm/
-bias_coverage_abc/
-bias_coverage_analysis/
+# R data files
+*.rds
+*.RData
+*.Rhistory
+*.Rproj.user/
 
-# Ignore specific R script
-figures_clear.R
-bias_005.R
-
-
-# Ignore Python cache
+# Python cache
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
 
+# Plots and figures
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
+*.gif
+
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Other temporary files
+*.tmp
+*.log
