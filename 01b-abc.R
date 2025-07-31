@@ -7,7 +7,7 @@ library(dplyr)
 library(tidyverse)
 library(gridExtra)
 library(cowplot)
-source("~/Desktop/Sims_calibrate/params_gen_001.R")
+source("~/Desktop/Sims_calibrate/00-params.R")
 #theta_use
 # --------------------------
 # Global Simulation Settings
@@ -300,10 +300,6 @@ simulate_and_calibrate <- function(true_params, sim_id) {
 # --------------------------
 
 library(slurmR)
-start_time <- Sys.time()
-simulate_and_calibrate(as.numeric(theta_use[1, ]), 1)
-end_time <- Sys.time()
-elapsed <- end_time - start_time
 ans <- Slurm_lapply(
   X = 1:N_SIMS,
   FUN = function(i) simulate_and_calibrate(as.numeric(theta_use[i, ]), i),
@@ -334,9 +330,6 @@ ans <- Slurm_lapply(
   )
 )
 
-end_time <- Sys.time()
-elapsed <- end_time - start_time
-cat(sprintf("Slurm_lapply() submission took %.2f seconds\n", as.numeric(elapsed, units = "secs")))
 
 # FIXED: Complete the results collection
 results_list <- Slurm_collect(ans)

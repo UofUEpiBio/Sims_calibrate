@@ -3,7 +3,7 @@
 library(tidyverse)
 library(epiworldR)
 library(glue)
-source("~/Desktop/Sims_calibrate/loading_lstm_model_003.R")
+source("~/Desktop/Sims_calibrate/01a-bilstm.R")
 # 1) load your ABC predictions
 
 # 2) constants
