@@ -15,3 +15,7 @@ bias_coverage_analysis/
 figures_clear.R
 bias_005.R
 
+
+# Ignore Python cache
+__pycache__/
+
