@@ -2,13 +2,16 @@
 .Rhistory
 .RData
 .Ruserdata
-.epiworldRcalibrate
-.bias_coverage_true
-.learning_abc
-.sims_calibrate
-.bias_coverage_lstm
-.bias_coverage_abc
-.bias_coverage_analysis
-.figures_clear.R
-.bias_005.R
+# Ignore these specific project folders
+epiworldRcalibrate/
+bias_coverage_true/
+learning_abc/
+sims_calibrate/
+bias_coverage_lstm/
+bias_coverage_abc/
+bias_coverage_analysis/
+
+# Ignore specific R script
+figures_clear.R
+bias_005.R
 
