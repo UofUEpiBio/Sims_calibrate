@@ -1,6 +1,4 @@
 
-
-````markdown
 # 📊 Sims_calibrate
 
 This repository contains R scripts for **parameter generation**, **model loading**, **calibration**, **prediction**, and **analysis** for epidemic simulation studies.  
@@ -81,8 +79,6 @@ Rscript 03-epicurves-stats.R
 
 ```bash
 Rscript 04-parameter-stats.R
-```
-
 ```
 
 
