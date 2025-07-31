@@ -75,6 +75,3 @@ Rscript 03-epicurves-stats.R
 Rscript 04-parameter-stats.R
 ```
 
-
-
-Do you want me to create that diagram for you?
